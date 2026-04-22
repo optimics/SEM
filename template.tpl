@@ -128,7 +128,7 @@ ___TEMPLATE_PARAMETERS___
     "name": "eventTime",
     "displayName": "Event Time (optional)",
     "simpleValueType": true,
-    "help": "Event timestamp. Accepts seconds or milliseconds (auto-detected). Falls back to server time if empty."
+    "help": "Event timestamp in milliseconds. Seconds input is auto-upscaled to ms. Falls back to server time if empty."
   },
   {
     "type": "GROUP",
@@ -176,73 +176,91 @@ ___TEMPLATE_PARAMETERS___
         "type": "TEXT",
         "name": "userEmail",
         "displayName": "Email (em)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of the normalized email (lowercase + trim). Hashing must be done on the frontend — the server-side template does not hash."
       },
       {
         "type": "TEXT",
         "name": "userPhone",
         "displayName": "Phone (ph)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of the phone in E.164 format (e.g. +420606666666). Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userFirstName",
         "displayName": "First Name (fn)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of the normalized first name (lowercase + trim). Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userLastName",
         "displayName": "Last Name (ln)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of the normalized last name (lowercase + trim). Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userGender",
         "displayName": "Gender (ge)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of 'm' / 'f' / 'o'. Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userDob",
         "displayName": "Date of Birth (db)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of YYYYMMDD. Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userCity",
         "displayName": "City (ct)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of the normalized city (lowercase + trim). Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
-        "name": "userState",
-        "displayName": "State (st)",
-        "simpleValueType": true
+        "name": "userRegion",
+        "displayName": "Region / State (region)",
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of the normalized region/state (lowercase + trim). Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userZip",
         "displayName": "Postal Code (zp)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of the trimmed ZIP/postal code. Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userStreet",
         "displayName": "Street (sr)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of the normalized street (lowercase + trim). Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userCountry",
         "displayName": "Country",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "help": "Expected SHA-256 hash of ISO 3166-1 alpha-2 code (lowercase). Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userSubscriptionId",
         "displayName": "Subscription ID",
         "simpleValueType": true
+      },
+      {
+        "type": "TEXT",
+        "name": "userUdid",
+        "displayName": "UDID (udid)",
+        "simpleValueType": true,
+        "help": "Unique user/device ID (cookie value from sul.js). Server-side template does not hash this value."
       }
     ]
   },
@@ -294,7 +312,7 @@ ___TEMPLATE_PARAMETERS___
         "name": "contents",
         "displayName": "Contents (array variable or JSON string)",
         "simpleValueType": true,
-        "help": "Assign a GTM variable that resolves to an array of content objects, or provide a JSON string."
+        "help": "Assign a GTM variable resolving to an array of SEM-native content objects [{id, quantity, unit_price, content_name, content_category}], or a JSON string in the same shape. When contents is present, content_type is required by SEM; if omitted, this template defaults it to product. No GA4 items mapping is performed — convert upstream."
       },
       {
         "type": "TEXT",
@@ -325,6 +343,70 @@ ___TEMPLATE_PARAMETERS___
         "name": "predictedLtv",
         "displayName": "Predicted LTV",
         "simpleValueType": true
+      },
+      {
+        "type": "TEXT",
+        "name": "valueTax",
+        "displayName": "Value Tax (value_tax)",
+        "simpleValueType": true,
+        "help": "Tax portion of value. Numeric."
+      },
+      {
+        "type": "TEXT",
+        "name": "reviewEmail",
+        "displayName": "Review Email (review_email, UNHASHED)",
+        "simpleValueType": true,
+        "help": "Zboží.cz satisfaction survey email. MUST be sent as plain text, NOT hashed. Only send with user consent."
+      },
+      {
+        "type": "TEXT",
+        "name": "productIds",
+        "displayName": "Product IDs (product_ids, array)",
+        "simpleValueType": true,
+        "help": "GTM variable resolving to an array of Zboží.cz product IDs (non-negative integers), or JSON string. Non-integer or negative entries are skipped with a warning."
+      },
+      {
+        "type": "TEXT",
+        "name": "goodsIntention",
+        "displayName": "Goods Intention (goods_intention)",
+        "simpleValueType": true,
+        "help": "User intent weight. Numeric."
+      },
+      {
+        "type": "TEXT",
+        "name": "goodsPhase",
+        "displayName": "Goods Phase (goods_phase)",
+        "simpleValueType": true,
+        "help": "User interest phase. Integer — non-integer values are passed through with a warning."
+      },
+      {
+        "type": "TEXT",
+        "name": "searchString",
+        "displayName": "Search String (search_string)",
+        "simpleValueType": true,
+        "help": "Search query text (e.g. for Search event)."
+      },
+      {
+        "type": "CHECKBOX",
+        "name": "statusEnabled",
+        "checkboxText": "Include status field",
+        "simpleValueType": true,
+        "defaultValue": false,
+        "help": "Enable this to include a boolean status in event_data. Needed because false is a legitimate value — a plain checkbox could not distinguish it from 'not set'."
+      },
+      {
+        "type": "SELECT",
+        "name": "status",
+        "displayName": "Status (bool)",
+        "selectItems": [
+          { "value": "true",  "displayValue": "true" },
+          { "value": "false", "displayValue": "false" }
+        ],
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "statusEnabled", "paramValue": true, "type": "EQUALS" }
+        ],
+        "help": "Registration/subscription status. Boolean — both true and false are legitimate values."
       }
     ]
   },
@@ -348,7 +430,7 @@ ___TEMPLATE_PARAMETERS___
         "checkboxText": "Use Optimistic Scenario",
         "simpleValueType": true,
         "defaultValue": true,
-        "help": "Returns success immediately without waiting for the API response. Recommended to disable during initial rollout."
+        "help": "Returns success to GTM immediately without waiting for the API response. Warning: 4xx/5xx responses are logged as errors but GTM still reports success. Disable for higher observability during rollout or for critical conversion tags."
       },
       {
         "type": "CHECKBOX",
@@ -356,7 +438,7 @@ ___TEMPLATE_PARAMETERS___
         "checkboxText": "Strict Event Validation",
         "simpleValueType": true,
         "defaultValue": false,
-        "help": "When enabled, unknown event names cause the tag to fail instead of just logging a warning. Recommended for production hardening."
+        "help": "When enabled, unknown event names and invalid JSON in object/array fields cause the tag to fail (and call gtmOnFailure) instead of just logging. Recommended for production hardening. When disabled, such issues are logged but the tag reports success."
       },
       {
         "type": "CHECKBOX",
@@ -465,7 +547,7 @@ ___TEMPLATE_PARAMETERS___
             "type": "TEXT"
           }
         ],
-        "help": "Catch-all override table for event data fields. Values for known numeric keys (value, delivery_price, other_costs, predicted_ltv) are auto-coerced to numbers."
+        "help": "Catch-all override table for event data fields. Values for known numeric keys (value, value_tax, delivery_price, other_costs, predicted_ltv, goods_intention, goods_phase) are auto-coerced to numbers."
       }
     ]
   }
@@ -494,7 +576,8 @@ const ALLOWED_EVENTS = [
 ];
 
 const NUMERIC_KEYS = [
-  'value', 'delivery_price', 'other_costs', 'predicted_ltv'
+  'value', 'value_tax', 'delivery_price', 'other_costs',
+  'predicted_ltv', 'goods_intention', 'goods_phase'
 ];
 
 const traceId = getRequestHeader('trace-id');
@@ -505,8 +588,23 @@ const resolvedEventName = data.eventNameSelect === 'custom'
 
 const apiUrl = 'https://sem.seznam.cz/rtgconv';
 
+// Seznam telemetry: `api.version` tracks the integration client version (bump on contract/behavior changes).
+// `api.template_version` tracks our CHANGELOG release version. These are independent of the
+// GTM ___INFO___.version field, which is a GTM-internal stability flag constrained to 0 or 1.
+const API_CLIENT_VERSION = '1';
+const TEMPLATE_VERSION = '2.1.2';
+
+// Parse JSON object/array fields once, up-front. `validate` decides severity, `buildPayload` consumes values.
+const parsed = {
+  consent:    parseJsonObjectField('consentModeObject', data.consentModeObject),
+  userData:   parseJsonObjectField('userDataObject',    data.userDataObject),
+  eventData:  parseJsonObjectField('eventDataObject',   data.eventDataObject),
+  contents:   parseJsonArray('contents',   data.contents),
+  productIds: parseJsonArray('productIds', data.productIds)
+};
+
 // Preflight validation
-const validationError = validate(data);
+const validationError = validate(data, parsed);
 if (validationError) {
   logToConsole('Seznam SEM [ERROR]: ' + validationError +
     ' | event=' + resolvedEventName + ' | trace=' + traceId);
@@ -516,7 +614,7 @@ if (validationError) {
 }
 
 // Build and send
-const payload = buildPayload(data);
+const payload = buildPayload(data, parsed);
 
 log({
   Name: 'Seznam SEM',
@@ -555,13 +653,11 @@ sendHttpRequest(
     if (result.statusCode >= 200 && result.statusCode < 300) {
       data.gtmOnSuccess();
     } else {
-      logToConsole('Seznam SEM [ERROR]: HTTP ' + result.statusCode +
-        ' | event=' + resolvedEventName + ' | trace=' + traceId);
+      logHttpError(result);
       data.gtmOnFailure();
     }
   } else if (result.statusCode < 200 || result.statusCode >= 300) {
-    logToConsole('Seznam SEM [ERROR]: HTTP ' + result.statusCode +
-      ' | event=' + resolvedEventName + ' | trace=' + traceId);
+    logHttpError(result);
   }
 }).catch(function() {
   logToBigQuery({ url: apiUrl, body: payload });
@@ -579,9 +675,20 @@ if (data.useOptimisticScenario) {
  * Validation
  ******************************************************************************/
 
-function validate(data) {
+function validate(data, parsed) {
   if (!resolvedEventName) return 'eventName is required';
   if (!data.semId) return 'semId is required';
+
+  // sem_id shape check: non-empty 24-character string.
+  // Full pattern `^[0-9a-z]{24}$` is enforced server-side — a stricter local charset check
+  // would need sandbox-safe string primitives we cannot verify without deploying.
+  if (!isValidSemId(data.semId)) {
+    var semIdMsg = 'semId must be a non-empty 24-character string; expected server-side pattern is ^[0-9a-z]{24}$';
+    if (data.strictEventValidation) {
+      return semIdMsg;
+    }
+    logToConsole('Seznam SEM [WARN]: ' + semIdMsg + ' | semId=' + data.semId + ' | trace=' + traceId);
+  }
 
   // Event name allowlist check
   var isKnown = false;
@@ -599,15 +706,39 @@ function validate(data) {
     logToConsole('Seznam SEM [WARN]: ' + msg + ' | trace=' + traceId);
   }
 
-  // Purchase-specific required fields
+  // JSON parse errors: consent is always a WARN (optional field);
+  // userData/eventData/contents fail under strictEventValidation, WARN otherwise.
+  if (parsed.consent.error) {
+    logToConsole('Seznam SEM [WARN]: ' + parsed.consent.error + ' | trace=' + traceId);
+  }
+  var fatalFields = [
+    { result: parsed.userData,   label: 'userDataObject' },
+    { result: parsed.eventData,  label: 'eventDataObject' },
+    { result: parsed.contents,   label: 'contents' },
+    { result: parsed.productIds, label: 'productIds' }
+  ];
+  for (var f = 0; f < fatalFields.length; f++) {
+    var entry = fatalFields[f];
+    if (entry.result.error) {
+      if (data.strictEventValidation) {
+        return entry.result.error;
+      }
+      logToConsole('Seznam SEM [ERROR]: ' + entry.result.error + ' | trace=' + traceId);
+    }
+  }
+
+  // Purchase-specific required fields (per rtgconv.json: value, currency, order_id).
+  // `contents` is recommended for retargeting/attribution but not required by the schema.
   if (resolvedEventName === 'Purchase') {
     var missing = [];
     if (!data.orderId) missing.push('orderId');
     if (!data.currency) missing.push('currency');
     if (data.value === undefined || data.value === null || data.value === '') missing.push('value');
-    if (!data.contents) missing.push('contents');
     if (missing.length > 0) {
       return 'Purchase requires: ' + missing.join(', ');
+    }
+    if (!data.contents) {
+      logToConsole('Seznam SEM [WARN]: Purchase without contents is accepted by the API but strongly recommended for retargeting/attribution | trace=' + traceId);
     }
   }
 
@@ -618,7 +749,7 @@ function validate(data) {
  * Payload builders
  ******************************************************************************/
 
-function buildPayload(data) {
+function buildPayload(data, parsed) {
   var eventTime = normalizeEventTime(data.eventTime);
   var eventUrl = data.eventUrl || getRequestHeader('referer') || '';
 
@@ -629,19 +760,24 @@ function buildPayload(data) {
     event_time: eventTime,
     event_source: data.eventSource || 'web',
     event_url: eventUrl,
-    event_data: buildEventData(data)
+    event_data: buildEventData(data, parsed.eventData.value, parsed.contents.value, parsed.productIds.value),
+    api: {
+      name: 'gtm-server-template',
+      version: API_CLIENT_VERSION,
+      template_version: TEMPLATE_VERSION
+    }
   };
 
   addIfPresent(payload, 'event_id', data.eventId);
 
-  var consentMode = buildConsentMode(data);
+  var consentMode = buildConsentMode(parsed.consent.value);
   if (hasProperties(consentMode)) {
     payload.consent_mode = consentMode;
   }
 
   addIfPresent(payload, 'consent_string', data.consentString);
 
-  var userData = buildUserData(data);
+  var userData = buildUserData(data, parsed.userData.value);
   if (hasProperties(userData)) {
     payload.user_ids = { user_data: userData };
   }
@@ -660,36 +796,27 @@ function buildPayload(data) {
 
 function normalizeEventTime(rawValue) {
   if (!rawValue && rawValue !== 0) {
-    return Math.floor(getTimestampMillis() / 1000);
+    return getTimestampMillis();
   }
   var num = makeNumber(rawValue);
   if (!num && num !== 0) {
     logToConsole('Seznam SEM [WARN]: eventTime is not numeric, using server time | trace=' + traceId);
-    return Math.floor(getTimestampMillis() / 1000);
+    return getTimestampMillis();
   }
-  // Auto-detect milliseconds (value > ~2286 in seconds = year 2042)
-  if (num > 9999999999) {
-    return Math.floor(num / 1000);
+  // Auto-detect seconds vs ms: values < 10000000000 (year 2286 in seconds) are seconds, upscale to ms.
+  if (num < 10000000000) {
+    return num * 1000;
   }
   return num;
 }
 
-function buildConsentMode(data) {
+function buildConsentMode(parsedConsent) {
   var ALLOWED_CONSENT_KEYS = [
     'ad_storage', 'ad_user_data', 'ad_personalization',
     'functionality_storage', 'analytics_storage'
   ];
 
-  var raw = {};
-  if (data.consentModeObject) {
-    var obj = data.consentModeObject;
-    if (getType(obj) === 'string') {
-      obj = JSON.parse(obj);
-    }
-    if (getType(obj) === 'object') {
-      mergeObject(raw, obj);
-    }
-  }
+  var raw = parsedConsent || {};
 
   // Keep only supported keys and normalize booleans
   var consent = {};
@@ -725,18 +852,12 @@ function buildS2sHeaders() {
   return headers;
 }
 
-function buildUserData(data) {
+function buildUserData(data, parsedUserDataObject) {
   var userData = {};
 
   // Layer 1: object variable
-  if (data.userDataObject) {
-    var obj = data.userDataObject;
-    if (getType(obj) === 'string') {
-      obj = JSON.parse(obj);
-    }
-    if (getType(obj) === 'object') {
-      mergeObject(userData, obj);
-    }
+  if (parsedUserDataObject) {
+    mergeObject(userData, parsedUserDataObject);
   }
 
   // Layer 2: individual fields
@@ -748,11 +869,13 @@ function buildUserData(data) {
   addIfPresent(userData, 'ge', data.userGender);
   addIfPresent(userData, 'db', data.userDob);
   addIfPresent(userData, 'ct', data.userCity);
-  addIfPresent(userData, 'st', data.userState);
+  // `userState` retained as deprecated runtime fallback (UI renamed to `userRegion`, wire key `region`).
+  addIfPresent(userData, 'region', data.userRegion || data.userState);
   addIfPresent(userData, 'zp', data.userZip);
   addIfPresent(userData, 'sr', data.userStreet);
   addIfPresent(userData, 'country', data.userCountry);
   addIfPresent(userData, 'subscription_id', data.userSubscriptionId);
+  addIfPresent(userData, 'udid', data.userUdid);
 
   // Layer 3: override table
   applyOverrides(userData, data.userDataOverrides);
@@ -760,18 +883,12 @@ function buildUserData(data) {
   return userData;
 }
 
-function buildEventData(data) {
+function buildEventData(data, parsedEventDataObject, parsedContents, parsedProductIds) {
   var ed = {};
 
   // Layer 1: object variable
-  if (data.eventDataObject) {
-    var obj = data.eventDataObject;
-    if (getType(obj) === 'string') {
-      obj = JSON.parse(obj);
-    }
-    if (getType(obj) === 'object') {
-      mergeObject(ed, obj);
-    }
+  if (parsedEventDataObject) {
+    mergeObject(ed, parsedEventDataObject);
   }
 
   // Always set sem_id
@@ -780,7 +897,12 @@ function buildEventData(data) {
   // Layer 2: individual fields
   addIfPresent(ed, 'sznaiid', data.sznaiid);
   addIfPresent(ed, 'currency', data.currency);
+  if (data.currency && data.currency !== 'CZK') {
+    logToConsole('Seznam SEM [WARN]: currency=' + data.currency +
+      ' - Seznam SEM currently supports only CZK | trace=' + traceId);
+  }
   addIfNumber(ed, 'value', data.value);
+  addIfNumber(ed, 'value_tax', data.valueTax);
   addIfPresent(ed, 'order_id', data.orderId);
   addIfPresent(ed, 'content_type', data.contentType);
   addIfNumber(ed, 'delivery_price', data.deliveryPrice);
@@ -788,37 +910,119 @@ function buildEventData(data) {
   addIfPresent(ed, 'payment_type', data.paymentType);
   addIfNumber(ed, 'other_costs', data.otherCosts);
   addIfNumber(ed, 'predicted_ltv', data.predictedLtv);
+  addIfNumber(ed, 'goods_intention', data.goodsIntention);
+  addIfPresent(ed, 'search_string', data.searchString);
+  addIfPresent(ed, 'review_email', data.reviewEmail); // NOT hashed - intentional (Zbozi.cz survey).
 
-  // Contents — handle array variable or JSON string
-  var parsedContents = parseContents(data.contents);
-  if (parsedContents) {
+  // goods_phase: schema says integer; pass-through but warn for non-integers.
+  if (data.goodsPhase !== undefined && data.goodsPhase !== null && data.goodsPhase !== '') {
+    var phase = makeNumber(data.goodsPhase);
+    ed.goods_phase = phase;
+    if (!isValidInteger(phase)) {
+      logToConsole('Seznam SEM [WARN]: goods_phase=' + data.goodsPhase +
+        ' is not an integer | trace=' + traceId);
+    }
+  }
+
+  // status: boolean; `statusEnabled` flag distinguishes "not set" from false.
+  if (data.statusEnabled) {
+    ed.status = (data.status === 'true' || data.status === true);
+  }
+
+  // product_ids: integers >= 0; invalid entries skipped with warning.
+  var validProductIds = coerceIntegerArray(parsedProductIds, 'productIds');
+  if (validProductIds) {
+    ed.product_ids = validProductIds;
+  }
+
+  // Contents: already parsed upstream. Empty array is schema-valid and passed through.
+  if (parsedContents !== null && parsedContents !== undefined) {
     ed.contents = parsedContents;
   }
 
   // Layer 3: override table (with typed coercion for numeric keys)
   applyOverrides(ed, data.eventDataOverrides);
 
-  return ed;
-}
-
-function parseContents(raw) {
-  if (!raw) return undefined;
-  if (getType(raw) === 'array') return raw;
-  if (getType(raw) === 'string') {
-    var parsed = JSON.parse(raw);
-    if (getType(parsed) === 'array') return parsed;
+  // SEM requires content_type whenever contents is present. Checkout/cart payloads
+  // with product arrays should use product; explicit values still win.
+  if (ed.contents !== undefined && ed.contents !== null && !ed.content_type) {
+    ed.content_type = 'product';
+    logToConsole('Seznam SEM [WARN]: contents present without content_type; defaulting content_type=product | trace=' + traceId);
   }
-  return undefined;
+
+  return ed;
 }
 
 /*******************************************************************************
  * Shared utilities
  ******************************************************************************/
 
+// Parse a field that may be an object, a JSON string, or empty. Returns {value, error}.
+// Callers decide severity (WARN vs. fail) based on strictEventValidation.
+// Note: sandboxed JS does not support try/catch, but JSON.parse returns undefined on invalid input.
+function parseJsonObjectField(fieldName, rawValue) {
+  if (!rawValue) return { value: null, error: null };
+  if (getType(rawValue) === 'object') return { value: rawValue, error: null };
+  if (getType(rawValue) === 'string') {
+    var parsed = JSON.parse(rawValue);
+    if (parsed === undefined) {
+      return { value: null, error: 'invalid JSON in ' + fieldName };
+    }
+    if (getType(parsed) === 'object') return { value: parsed, error: null };
+    return { value: null, error: fieldName + ' is not a JSON object' };
+  }
+  return { value: null, error: fieldName + ' has unsupported type: ' + getType(rawValue) };
+}
+
+// Parse a field that may be an array, a JSON string of an array, or empty. Returns {value, error}.
+function parseJsonArray(fieldName, rawValue) {
+  if (!rawValue) return { value: null, error: null };
+  if (getType(rawValue) === 'array') return { value: rawValue, error: null };
+  if (getType(rawValue) === 'string') {
+    var parsed = JSON.parse(rawValue);
+    if (parsed === undefined) {
+      return { value: null, error: 'invalid JSON in ' + fieldName };
+    }
+    if (getType(parsed) === 'array') return { value: parsed, error: null };
+    return { value: null, error: fieldName + ' is not a JSON array' };
+  }
+  return { value: null, error: fieldName + ' has unsupported type: ' + getType(rawValue) };
+}
+
 function addIfPresent(obj, key, value) {
   if (value) {
     obj[key] = value;
   }
+}
+
+// NaN fails all comparisons, so `n === Math.floor(n)` returns false for NaN.
+function isValidInteger(n) {
+  return n !== undefined && n !== null && n === Math.floor(n);
+}
+
+// Local shape check only: non-empty 24-character string.
+// Full charset pattern ^[0-9a-z]{24}$ is enforced server-side. A stricter local
+// charset check (charCodeAt / charAt+indexOf) is avoided here: GTM sandbox
+// dropped charCodeAt in deploy, and we are not willing to assume other
+// String.prototype methods without proof that they work in this sandbox.
+function isValidSemId(id) {
+  if (!id) return false;
+  return getType(id) === 'string' && id.length === 24;
+}
+
+function coerceIntegerArray(arr, fieldName) {
+  if (!arr) return undefined;
+  var out = [];
+  for (var i = 0; i < arr.length; i++) {
+    var n = makeNumber(arr[i]);
+    if (!isValidInteger(n) || n < 0) {
+      logToConsole('Seznam SEM [WARN]: ' + fieldName + '[' + i + ']=' + arr[i] +
+        ' is not a non-negative integer, skipping | trace=' + traceId);
+      continue;
+    }
+    out.push(n);
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 function addIfNumber(obj, key, value) {
@@ -867,6 +1071,15 @@ function log(message) {
   if (data.testMode) {
     logToConsole(JSON.stringify(message));
   }
+}
+
+function logHttpError(result) {
+  var bodySnippet = result.body ? JSON.stringify(result.body).substring(0, 200) : 'n/a';
+  logToConsole('Seznam SEM [ERROR]: HTTP ' + result.statusCode +
+    ' | event=' + resolvedEventName +
+    ' | semId=' + data.semId +
+    ' | trace=' + traceId +
+    ' | body=' + bodySnippet);
 }
 
 function logToBigQuery(requestInfo, responseInfo) {
@@ -1193,11 +1406,426 @@ ___SERVER_PERMISSIONS___
 
 ___TESTS___
 
-scenarios: []
+scenarios:
+- name: Purchase minimal valid - contents is optional (regression P0-3)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((resolve) => {
+        resolve({ statusCode: 200, headers: {}, body: '' });
+      });
+    });
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      orderId: 'ORDER-1',
+      currency: 'CZK',
+      value: 100,
+      useOptimisticScenario: false
+    });
+    callLater(() => {
+      assertApi('gtmOnSuccess').wasCalled();
+      assertThat(capturedBody.event_name).isEqualTo('Purchase');
+    });
+
+- name: Purchase missing orderId fails (synchronous validation)
+  code: |-
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      currency: 'CZK',
+      value: 100
+    });
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('sendHttpRequest').wasNotCalled();
+
+- name: event_time in seconds is upscaled to ms (regression P0-1)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      eventTime: 1700000000,
+      useOptimisticScenario: false
+    });
+    // Payload capture is synchronous inside the mock; no callLater needed.
+    assertThat(capturedBody.event_time).isEqualTo(1700000000000);
+
+- name: event_time in ms is passed through
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      eventTime: 1700000000000,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_time).isEqualTo(1700000000000);
+
+- name: userRegion maps to wire key region (regression P0-2)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userRegion: 'PR',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.region).isEqualTo('PR');
+    assertThat(capturedBody.user_ids.user_data.st).isUndefined();
+
+- name: userState legacy fallback still maps to region
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userState: 'PR',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.region).isEqualTo('PR');
+
+- name: userRegion takes precedence over userState fallback
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userRegion: 'PR',
+      userState: 'XX',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.region).isEqualTo('PR');
+
+- name: api object is present in payload (regression P1-1)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.api.name).isEqualTo('gtm-server-template');
+    assertThat(capturedBody.api.version).isDefined();
+    assertThat(capturedBody.api.template_version).isDefined();
+
+- name: Consent denied drops s2s_headers
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getRequestHeader', (name) => {
+      if (name === 'x-forwarded-for') return '1.2.3.4';
+      if (name === 'user-agent') return 'test-ua';
+      return undefined;
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      consentModeObject: { ad_storage: 'denied', ad_user_data: 'denied' },
+      sendS2sHeaders: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.s2s_headers).isUndefined();
+
+- name: Unknown event + strict fails (synchronous validation)
+  code: |-
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'custom',
+      eventNameCustom: 'Foo',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      strictEventValidation: true
+    });
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('sendHttpRequest').wasNotCalled();
+
+- name: Unknown event + loose still sends (optimistic - synchronous gtmOnSuccess)
+  code: |-
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'custom',
+      eventNameCustom: 'Foo',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      strictEventValidation: false,
+      useOptimisticScenario: true
+    });
+    // Optimistic mode calls gtmOnSuccess synchronously (before the HTTP response).
+    assertApi('gtmOnSuccess').wasCalled();
+    assertApi('sendHttpRequest').wasCalled();
+
+- name: Invalid JSON in userDataObject fails under strict (synchronous validation)
+  code: |-
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userDataObject: '{not json',
+      strictEventValidation: true
+    });
+    assertApi('gtmOnFailure').wasCalled();
+
+- name: Invalid JSON in eventDataObject fails under strict (synchronous validation)
+  code: |-
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      eventDataObject: '{not json',
+      strictEventValidation: true
+    });
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('sendHttpRequest').wasNotCalled();
+
+- name: Invalid JSON in contents fails under strict (synchronous validation)
+  code: |-
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      contents: '{not json',
+      strictEventValidation: true
+    });
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('sendHttpRequest').wasNotCalled();
+
+- name: Invalid JSON in userDataObject warns under loose (does not crash)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userDataObject: '{not json',
+      strictEventValidation: false,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_name).isEqualTo('PageView');
+    callLater(() => { assertApi('gtmOnSuccess').wasCalled(); });
+
+- name: status false is included in payload
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'CompleteRegistration',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      statusEnabled: true,
+      status: 'false',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.status).isEqualTo(false);
+
+- name: value_tax first-class coerces to number
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      valueTax: '19.50',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.value_tax).isEqualTo(19.5);
+
+- name: reviewEmail first-class is passed plain text
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      orderId: 'ORDER-1',
+      currency: 'CZK',
+      value: 100,
+      reviewEmail: 'user@example.com',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.review_email).isEqualTo('user@example.com');
+
+- name: productIds skips non-integer and negative entries
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      productIds: '["12","34","bad",-1]',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.product_ids).isEqualTo([12, 34]);
+
+- name: userUdid maps to wire key udid
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userUdid: 'abc123',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('abc123');
+
+- name: contents empty array is passed through
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'ViewContent',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      contents: [],
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.contents).isEqualTo([]);
+
+- name: contents without content_type defaults to product
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'InitiateCheckout',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      currency: 'CZK',
+      value: 494.21,
+      contents: [{ id: '50118490', quantity: 1, unit_price: 123.14 }],
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.content_type).isEqualTo('product');
+    assertThat(capturedBody.event_data.contents.length).isEqualTo(1);
+
+- name: explicit content_type is preserved when contents is present
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      contentType: 'product_group',
+      contents: [{ id: 'CATEGORY-1' }],
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.content_type).isEqualTo('product_group');
+
+- name: Short semId + strict fails (length check, synchronous validation)
+  code: |-
+    // Local check is now length-only (24 chars). 'BAD' = 3 chars fails locally.
+    // Full ^[0-9a-z]{24}$ pattern is enforced server-side.
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'BAD',
+      strictEventValidation: true
+    });
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('sendHttpRequest').wasNotCalled();
+
+- name: Short semId + loose still sends with warning (length check)
+  code: |-
+    // Local check is now length-only (24 chars). 'BAD' = 3 chars triggers WARN but hit still goes out.
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'BAD',
+      strictEventValidation: false,
+      useOptimisticScenario: true
+    });
+    assertApi('sendHttpRequest').wasCalled();
+
+- name: SemId off pattern 24 chars does not crash regression hotfix v211
+  code: |-
+    // Hotfix regression: the old charCodeAt-based charset check crashed with TypeError
+    // in the SGTM sandbox. Local validation now only checks length == 24. An off-pattern
+    // 24-char string passes local validation; backend response (e.g. 400) is asserted
+    // irrelevant here — we only verify the tag did not crash and attempted the request.
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 400 })));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'ABCDEFGHIJKLMNOPQRSTUVWX',
+      strictEventValidation: false,
+      useOptimisticScenario: true
+    });
+    assertApi('sendHttpRequest').wasCalled();
+
+- name: Non-CZK currency sends with warning (regression P2-2)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      orderId: 'ORDER-1',
+      currency: 'EUR',
+      value: 100,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.currency).isEqualTo('EUR');
+    callLater(() => { assertApi('gtmOnSuccess').wasCalled(); });
 
 
 ___NOTES___
 
-v2.0.0 — Variable-driven redesign.
+v2.1.2 — Defaults content_type=product when contents is present without content_type.
+v2.1.1 — Hotfix for SGTM sandbox compatibility (charCodeAt removed).
 All Seznam payload fields are explicit template parameters.
 No GA4 coupling — template reads data.* only.
+PII hashing is the frontend's responsibility; server-side template is pass-through
+(exception: review_email is plain text by design).
