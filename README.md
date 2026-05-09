@@ -1,134 +1,357 @@
-# Seznam SEM Conversion API — SGTM šablona
+# Seznam SEM Conversion API - SGTM šablona
 
-Server-Side Google Tag Manager šablona pro odesílání konverzních událostí do Seznam SEM API (`https://sem.seznam.cz/rtgconv`). Každé pole payloadu je explicitní parametr šablony, který se přiřadí přes GTM variable.
+Server-Side Google Tag Manager šablona pro odesílání konverzních událostí do Seznam SEM API (`https://sem.seznam.cz/rtgconv`).
 
-## Podporované události
+Šablona je primárně **variable-driven**: jednotlivá pole payloadu přiřazujete přes GTM proměnné. Od verze 2.2 umí volitelně načítat část dat automaticky z příchozí GA4 události (`getAllEventData()`), ale tato funkce je ve výchozím stavu vypnutá.
 
-PageView, ViewContent, Purchase, Contact, AddToCart, AddToWishlist, InitiateCheckout, AddPaymentInfo, Search, CompleteRegistration, Lead, Subscribe, CustomizeProduct, Donate, FindLocation, Schedule, StartTrial, SubmitApplication
+## Důležité před nasazením
 
-Lze také zadat vlastní název přes volbu "Custom".
+### `sul.js` je stále potřeba
+
+Serverová šablona nenahrazuje frontendový skript `sul.js`. Ten je stále potřeba, protože na webu vytváří identifikátory `sid` a `udid`, které Seznam používá pro párování uživatele.
+
+Doporučený postup:
+
+1. Na webu načtěte oficiální Seznam skript `sul.js` nebo použijte frontendovou GTM šablonu.
+2. Hodnoty `sid` a `udid` předejte do Server-Side GTM jako GTM proměnné.
+3. V této serverové šabloně je přiřaďte do skupiny **User Data**.
+
+`sid` a `udid` se neposílají zahashované. Jsou to hodnoty ze `sul.js`.
+
+### S2S SEM ID není stejné jako frontend SEM ID
+
+Pole **S2S SEM ID (Sklik)** je identifikátor pro server-to-server měření. Najdete ho ve Skliku v pokročilém nastavení účtu. Není to stejné ID jako frontendové `sul.js?id=...`.
+
+### Serverová šablona nehashuje PII
+
+Email, telefon, jméno, příjmení, adresa a další PII pole musí být zahashovaná pomocí SHA-256 už před odesláním do SGTM. Serverová šablona hodnoty pouze předává dál.
+
+Výjimky:
+
+- `sid` a `udid` se nehashují.
+- `subscription_id` se posílá tak, jak ho máte v systému.
+- `review_email` pro Zboží.cz dotazník spokojenosti se posílá jako plain text.
 
 ## Instalace
 
-1. Otevřete svůj Server-Side GTM container.
-2. `Templates` → `Tag Templates` → `New` → menu (`...`) → `Import`.
-3. Vyberte soubor `template.tpl` a uložte.
+1. Otevřete Server-Side GTM container.
+2. `Templates` -> `Tag Templates` -> `New` -> menu (`...`) -> `Import`.
+3. Vyberte soubor `template.tpl`.
+4. Zkontrolujte nová oprávnění a šablonu uložte.
 
-### Vytvoření tagu
-1. `Tags` → `New` → zvolte `Seznam SEM Conversion API`.
+Při aktualizaci ze starší verze může GTM vyžadovat schválení nových oprávnění:
+
+- `read_event_data` - čtení příchozích event dat pro GA4 Auto-Map a URL fallback pro `sznaiid`.
+- `set_cookies` - zápis cookie `sznaiid`.
+- `get_cookies` - čtení cookie `sznaiid`.
+
+## Vytvoření tagu
+
+1. `Tags` -> `New` -> zvolte `Seznam SEM Conversion API`.
 2. Nastavte povinná pole:
-   - **Event Name**: GTM variable s názvem události
-   - **SEM ID**: váš Sklik advertiser ID
-3. Volitelná pole:
-   - **Event URL**: URL stránky (fallback na Referer header)
-   - **Event ID**: unikátní ID pro deduplikaci
-   - **Event Time**: timestamp (auto-detect ms vs s)
-4. Rozbalte **Event Data** — currency, value, order ID, contents atd.
-5. Rozbalte **User Data** — email, phone, name, address fields, nebo jeden User Data Object.
-6. Rozbalte **Settings**:
-   - **Test Mode**: zapněte při testování (loguje celý payload a response)
-   - **Use Optimistic Scenario**: vypněte při počátečním nasazení
-   - **Strict Event Validation**: zapněte v produkci
+   - **Event Name**: vyberte podporovanou SEM událost, `Auto from GA4`, nebo `From variable`.
+   - **S2S SEM ID (Sklik)**: S2S SEM ID ze Skliku.
+3. Doporučená pole:
+   - **Event URL**: URL stránky. Pokud zůstane prázdné, šablona použije GA4 `page_location` nebo `Referer`.
+   - **Event ID**: unikátní ID události pro deduplikaci.
+   - **User Data**: minimálně `sid` a `udid` ze `sul.js`, ideálně i zahashované PII.
+4. Pro ecommerce události vyplňte **Event Data** (`currency`, `value`, `order_id`, `contents`, atd.) nebo zapněte GA4 Auto-Map.
+5. Při prvním testování vypněte **Use Optimistic Scenario**, aby GTM čekal na odpověď API.
+6. V produkci doporučujeme zapnout **Strict Event Validation**.
 
-### Trigger
-- Custom Event trigger pro jednotlivý event
-- Event Name equals `PageView`, `Purchase`, `ViewContent` atd.
+## Podporované události
 
-## Konfigurace
+Šablona pracuje s pevným seznamem SEM událostí. Neznámý název události zaloguje warning; pokud je zapnutý **Strict Event Validation**, tag selže.
 
-**Povinné**: Event Name, SEM ID
+| SEM událost | GA4 Auto-Map zdroj | Poznámka |
+|---|---|---|
+| `PageView` | `page_view` | |
+| `ViewContent` | `view_item`, `view_item_list`, `select_item`, `view_promotion` | Detail produktu / obsahu. |
+| `Purchase` | `purchase` | Vyžaduje `order_id`, `currency`, `value`. |
+| `Contact` | `contact` | |
+| `AddToCart` | `add_to_cart` | |
+| `AddToWishlist` | `add_to_wishlist` | |
+| `InitiateCheckout` | `begin_checkout` | |
+| `AddPaymentInfo` | `add_payment_info`, `add_shipping_info` | SEM nemá samostatnou událost pro shipping info. |
+| `Search` | `search`, `view_search_results` | `search_term` se mapuje na `search_string`. |
+| `CompleteRegistration` | `sign_up`, `login` | Pokud není nastavený `status`, šablona doplní `status=true`. |
+| `Lead` | `generate_lead` | |
+| `Subscribe` | `subscribe` | |
+| `CustomizeProduct` | explicitně | Bez GA4 Auto-Map zdroje. |
+| `Donate` | explicitně | Bez GA4 Auto-Map zdroje. |
+| `FindLocation` | explicitně | Ponecháno, protože je stále v dokumentaci Seznamu. |
+| `Schedule` | explicitně | Bez GA4 Auto-Map zdroje. |
+| `StartTrial` | explicitně | Bez GA4 Auto-Map zdroje. |
+| `SubmitApplication` | explicitně | Bez GA4 Auto-Map zdroje. |
 
-**Volitelné sekce**:
-- **Consent** — consent mode object (ad_storage, ad_user_data, ...) + IAB TCF consent string
-- **User Data** — em, ph, fn, ln, ge, db, ct, region, zp, sr, country, SID, subscription_id
-- **Event Data** — currency, value, order_id, content_type, contents, delivery_price, delivery_type, payment_type, other_costs, predicted_ltv, sznaiid
-- **Settings** — test mode, optimistic scenario, strict validation, S2S headers
-- **BigQuery Logs** — logování request/response do BigQuery
-- **Advanced Overrides** — override tabulky pro user data a event data
+### Způsoby nastavení názvu události
 
-Data se slučují ve 3 vrstvách: object variable → individual fields → override table.
+| Nastavení | Chování |
+|---|---|
+| Vybraná konkrétní událost | Použije se vybraný SEM název. |
+| `Auto from GA4` | Použije se mapování z GA4 `event_name` podle tabulky výše. Vyžaduje zapnutý GA4 Auto-Map a `autoMapEventName`. |
+| `From variable` | Použije se hodnota z GTM proměnné, ale musí být jedna z podporovaných SEM událostí. |
 
+Šablona záměrně neposílá neznámé GA4 názvy jako custom události. Na rozdíl od Facebook CAPI není u Seznam SEM vhodné spoléhat na libovolné custom event names.
 
-## User data — hashing kontrakt
+## GA4 Auto-Map
 
-Server-side šablona PII **nehashuje**. Klient (frontend) **musí** zahashovat SHA-256 následující pole **před** odesláním do SGTM:
+GA4 Auto-Map je ve výchozím stavu vypnutý. Zapíná se ve skupině **GA4 Auto-Map (opt-in)**.
 
-| Pole | Normalizace před hashem |
-|------|--------------------------|
-| `em` (email) | lowercase + trim |
-| `ph` (phone) | E.164 (např. `+420606666666`) |
-| `fn` (first name) | lowercase + trim |
-| `ln` (last name) | lowercase + trim |
-| `ge` (gender) | `m` / `f` / `o` |
-| `db` (date of birth) | formát `YYYYMMDD` |
-| `ct` (city) | lowercase + trim |
-| `region` | lowercase + trim |
-| `zp` (ZIP) | trim |
-| `sr` (street) | lowercase + trim |
-| `country` | ISO 3166-1 alpha-2, lowercase |
+Podvolby:
 
-### Výjimka — `review_email`
+| Volba | Výchozí stav | Popis |
+|---|---|---|
+| `enableGa4AutoMap` | vypnuto | Hlavní přepínač. |
+| `autoMapEventName` | vypnuto | Mapuje GA4 `event_name` na SEM event, pokud je Event Name nastavený na `Auto from GA4`. |
+| `autoMapEventData` | zapnuto po zapnutí hlavní volby | Mapuje ecommerce a event_data pole. |
+| `autoMapUserData` | zapnuto po zapnutí hlavní volby | Mapuje pouze předem zahashované `sha256_*` hodnoty z GA4 `user_data`. |
 
-Pole `review_email` (Zboží.cz dotazník spokojenosti) se **nehashuje** — posílá se jako plain text. Šablona ho pass-through bez jakékoli modifikace.
+### Mapování event_data z GA4
 
+| SEM pole | GA4 / vstupní zdroj | Poznámka |
+|---|---|---|
+| `order_id` | `transaction_id` -> `id` -> `orderNo` | `orderNo` pomáhá například u Shoptetu. |
+| `value` | `value` -> `revenue` -> `totalWithoutVat` -> součet `unit_price * quantity` z contents | Zaokrouhleno na 2 desetinná místa. Součet se použije jen u auto-mapovaných contents. |
+| `currency` | `currency` | Seznam typicky očekává `CZK`; jiná měna zaloguje warning. |
+| `value_tax` | `tax` | |
+| `delivery_price` | `shipping` | |
+| `payment_type` | `payment_type` | |
+| `delivery_type` | `shipping_tier` | |
+| `search_string` | `search_term` | |
+| `event_url` | `page_location` | Top-level pole payloadu. |
+| `event_id` | `event_id` -> `transaction_id` | Top-level pole payloadu. |
 
-## Contents — formát
+### Mapování `items[]` na `contents[]`
 
-`contents` musí být v nativním SEM tvaru. **Žádné mapování z GA4 `items` se neprovádí** — pokud používáš GA4, namapuj si pole v GTM variable před přiřazením do `contents`.
+| SEM `contents[]` pole | GA4 / vstupní zdroj | Poznámka |
+|---|---|---|
+| `id` | `item_id` -> `id` | Povinné pro auto-mapované položky. Položky bez ID se přeskočí s warningem. |
+| `content_name` | `item_name` -> `name` | |
+| `unit_price` | `price` -> `priceWithVat` -> `fullPrice` | Zaokrouhleno na 2 desetinná místa. |
+| `quantity` | `quantity` -> `1` | Pokud chybí nebo není číslo, doplní se `1`. |
+| `content_category` | `category` -> `currentCategory` / `defaultCategory` -> `item_category...item_category5` | Priorita je exkluzivní, první nalezený zdroj vyhrává. |
 
-Očekávaný tvar:
+Příklady kategorií:
+
+- `category: "A/B/C"` -> `A | B | C`
+- `item_category: "A", item_category2: "B"` -> `A | B`
+- `currentCategory: ["A", "B"]` -> `A | B`
+
+### Mapování GA4 user_data
+
+Automaticky se mapují pouze předem zahashované hodnoty:
+
+| GA4 pole | SEM user_data pole |
+|---|---|
+| `user_data.sha256_email_address` | `em` |
+| `user_data.sha256_phone_number` | `ph` |
+| `user_data.address.sha256_first_name` | `fn` |
+| `user_data.address.sha256_last_name` | `ln` |
+
+Raw hodnoty jako `email`, `phone`, `first_name`, `last_name` se automaticky neposílají. Serverová šablona je nehashuje.
+
+## Podporované parametry payloadu
+
+### Top-level pole
+
+| Pole | Zdroj |
+|---|---|
+| `event_name` | Event Name nastavení, `From variable`, nebo GA4 Auto-Map |
+| `schema_version` | konstantně `v2` |
+| `event_type` | konstantně `rtgconv` |
+| `event_time` | `Event Time` nebo serverový čas |
+| `event_source` | `web` nebo `app` |
+| `event_url` | `Event URL` -> GA4 `page_location` -> `Referer` |
+| `event_id` | `Event ID` -> GA4 `event_id` -> GA4 `transaction_id` |
+| `consent_mode` | Consent Mode Object |
+| `consent_string` | IAB TCF consent string |
+| `user_ids.user_data` | User Data sekce |
+| `event_data` | Event Data sekce |
+| `s2s_headers` | IP, User-Agent a Client Hints z requestu, pokud je povoleno a consent granted |
+
+### User Data
+
+| SEM pole | Parametr v šabloně | Poznámka |
+|---|---|---|
+| `sid` | `sid` | Hodnota cookie ze `sul.js`, nehashovat. |
+| `udid` | `userUdid` | Hodnota ze `sul.js`, nehashovat. |
+| `em` | `userEmail` | SHA-256 email. |
+| `ph` | `userPhone` | SHA-256 telefon. |
+| `fn` | `userFirstName` | SHA-256 jméno. |
+| `ln` | `userLastName` | SHA-256 příjmení. |
+| `ge` | `userGender` | SHA-256 gender. |
+| `db` | `userDob` | SHA-256 datum narození. |
+| `ct` | `userCity` | SHA-256 město. |
+| `region` | `userRegion` | SHA-256 region/stát. |
+| `zp` | `userZip` | SHA-256 PSČ. |
+| `sr` | `userStreet` | SHA-256 ulice. |
+| `country` | `userCountry` | SHA-256 země. |
+| `subscription_id` | `userSubscriptionId` | Identifikátor subscription. |
+
+`userDataObject` může obsahovat přímo SEM klíče (`em`, `ph`, `fn`, ...). Od v2.2.1 umí šablona přeložit i frontend-style aliasy:
+
+| Alias v `userDataObject` | SEM klíč |
+|---|---|
+| `email` | `em` |
+| `phone` | `ph` |
+| `fname` | `fn` |
+| `lname` | `ln` |
+| `gender`, `g` | `ge` |
+| `birth`, `birthDate` | `db` |
+| `postalCode`, `zip` | `zp` |
+| `subscription`, `subscriptionId` | `subscription_id` |
+
+Alias změní pouze název klíče. Hodnota musí být stále už zahashovaná. Při použití aliasu šablona zaloguje warning, aby bylo vidět, že je lepší používat kanonický SEM klíč.
+
+### Event Data
+
+| SEM pole | Parametr v šabloně | Poznámka |
+|---|---|---|
+| `sem_id` | `semId` | Povinné S2S SEM ID. |
+| `sznaiid` | `sznaiid`, URL, nebo cookie | Click-through ID. Manuální hodnota vyhrává. |
+| `currency` | `currency` | Například `CZK`. |
+| `value` | `value` | Číslo. |
+| `value_tax` | `valueTax` | Číslo. |
+| `order_id` | `orderId` | Povinné pro Purchase. |
+| `content_type` | `contentType` | Pokud existují `contents` a chybí `content_type`, doplní se `product`. |
+| `contents` | `contents` | Array v SEM tvaru nebo GA4 Auto-Map z `items[]`. |
+| `product_ids` | `productIds` | Pole nezáporných integer ID produktů pro Zboží.cz. |
+| `delivery_price` | `deliveryPrice` | Číslo. |
+| `delivery_type` | `deliveryType` | |
+| `payment_type` | `paymentType` | |
+| `other_costs` | `otherCosts` | Číslo. |
+| `predicted_ltv` | `predictedLtv` | Číslo. |
+| `goods_intention` | `goodsIntention` | Číslo. |
+| `goods_phase` | `goodsPhase` | Integer; neinteger zaloguje warning. |
+| `search_string` | `searchString` | Hlavně pro Search. |
+| `review_email` | `reviewEmail` | Plain text, nehashovat. |
+| `status` | `statusEnabled` + `status` | Boolean. |
+
+## Contents - ruční formát
+
+Pokud nepoužíváte GA4 Auto-Map, `contents` posílejte v nativním SEM tvaru:
 
 ```json
 [
   {
     "id": "SKU-123",
     "quantity": 2,
-    "unit_price": 249.90,
+    "unit_price": 249.9,
     "content_name": "Modrá čepice",
-    "content_category": "Prislusenstvi | Kryty | Apple"
+    "content_category": "Příslušenství | Čepice"
   }
 ]
 ```
 
 | Pole | Typ | Poznámka |
-|------|-----|----------|
-| `id` | string | SKU |
-| `quantity` | integer | počet kusů |
-| `unit_price` | number | **s DPH** |
-| `content_name` | string | název — pro Purchase povinné |
-| `content_category` | string | hierarchie kategorie, např. `Prislusenstvi \| Kryty \| Apple` |
+|---|---|---|
+| `id` | string | SKU nebo produktové ID. |
+| `quantity` | integer | Počet kusů. |
+| `unit_price` | number | Cena za kus. |
+| `content_name` | string | Název produktu/obsahu. |
+| `content_category` | string | Kategorie, například `Elektronika | Telefony`. |
 
-Pozor na VAT: `value` na eventu je **bez DPH**, `unit_price` v `contents[]` je **s DPH**. Součet `quantity * unit_price` nemusí být roven `value`.
+## `sznaiid` first-party cookie
 
+Ve výchozím stavu je zapnuté ukládání `sznaiid` do first-party cookie.
 
-## Deployment notes
+Chování:
 
-### Event URL fallback
-Pokud necháš `Event URL` prázdný, šablona použije HTTP hlavičku `Referer` z příchozího requestu jako fallback. Pokud chybí i `Referer`, odejde `event_url: ''` (prázdný string). Seznam S2S dokumentace označuje `event_url` jako povinný, takže minimálně jednu z cest musíš zajistit:
-- přiřadit GTM variable na `Event URL` (preferované — má přesnou URL stránky, ne jen dokument, odkud request přišel), **nebo**
-- zajistit, aby klient posílal `Referer` hlavičku do SGTM endpointu.
+1. Šablona hledá `?sznaiid=...` v GA4 `page_location`.
+2. Pokud ho nenajde, zkusí `Referer`.
+3. Pokud je zapnutá cookie persistence, uloží hodnotu do cookie `sznaiid`.
+4. Na dalších událostech bez URL parametru použije hodnotu z cookie.
+5. Manuálně vyplněné pole `sznaiid` v tagu má vždy přednost.
 
-### Client IP detection
-Šablona bere `client_ip_address` z prvního záznamu hlavičky `X-Forwarded-For`. Pokud je sGTM za více proxies (Cloudflare + GCP LB + další), první IP může být IP proxy, ne klienta. Pro produkční nasazení na GCP Cloud Run za HTTPS LB je první IP obvykle client IP. Pokud používáš jinou topologii, ověř si to v `request_headers` logu.
+Režimy:
 
+| Režim | Popis |
+|---|---|
+| `first_touch` | Zapíše cookie jen pokud ještě neexistuje. Výchozí. |
+| `last_touch` | Přepíše cookie při každém novém `?sznaiid=...`. |
 
-## Security — BigQuery logging
+Vypnutí `persistSznaiidCookie` vypne čtení i zápis cookie, ale URL hodnota `?sznaiid=...` se stále může poslat v payloadu.
 
-Šablona má v `access_bigquery` permission deklarovaný wildcard scope (`projectId: *, datasetId: *, tableId: *, operation: write`). To není laxita — GTM Custom Template permissions jsou staticky deklarované při publikaci šablony a **nelze je navázat na runtime hodnotu parametru**. Pokud bychom hardcodovali konkrétní project/dataset/table, byla by šablona nepoužitelná pro kohokoli s jinou konfigurací.
+## Event ID a deduplikace
 
-Efektivní omezení zápisu se řeší **IAM** na sGTM service accountu:
-- service account by měl mít roli `roles/bigquery.dataEditor` **jen** na konkrétní dataset, kam má šablona logovat,
+`event_id` je doporučené pro deduplikaci. Pokud posíláte stejnou konverzi z frontendu i ze serveru, musí být `event_id` na obou stranách stejné.
+
+Pozor: některé frontendové šablony pro Purchase automaticky generují `event_id` ve tvaru:
+
+```text
+Purchase__<order_id>
+```
+
+Tato serverová šablona takové ID záměrně automaticky nevytváří. Pokud chcete deduplikovat frontend a server, nastavte `Event ID` na stejnou hodnotu jako na frontendu.
+
+## Merge order
+
+Pole se skládají ve vrstvách. Pozdější vrstva přepisuje předchozí:
+
+1. GA4 Auto-Map - pokud je zapnutý.
+2. Object variable - `userDataObject` / `eventDataObject`.
+3. Individual fields - jednotlivá UI pole.
+4. Advanced Overrides - override tabulky.
+
+Speciální případy:
+
+- `contents` z GA4 Auto-Map se použije jen pokud není vyplněné ruční `contents`.
+- `sznaiid` z cookie/URL je fallback mezi object variable a individual fields.
+- Advanced Overrides umí přidat nebo přepsat pole, ale neumí pole odstranit.
+
+## Advanced Overrides
+
+Skupina **Advanced Overrides** je nouzový mechanismus pro hodnoty, které nejsou v UI jako samostatné pole.
+
+- `userDataOverrides` zapisuje do `user_ids.user_data`.
+- `eventDataOverrides` zapisuje do `event_data`.
+- Pokud zadáte klíč, který už existuje, override ho přepíše.
+- Pokud zadáte nový klíč, šablona ho do payloadu přidá.
+- Seznam ale může neznámá pole ignorovat nebo odmítnout podle schématu. Používejte jen po potvrzení, že dané pole Seznam podporuje.
+
+Override tabulka neumí mazat pole. Prázdné hodnoty jsou ignorované.
+
+## Consent a S2S headers
+
+`s2s_headers` obsahuje IP adresu, User-Agent a Client Hints. Šablona je pošle jen když:
+
+- `sendS2sHeaders` je zapnuté,
+- `consent_mode.ad_storage` je `granted`,
+- `consent_mode.ad_user_data` je `granted`.
+
+Podporované consent keys:
+
+- `ad_storage`
+- `ad_user_data`
+- `ad_personalization`
+- `functionality_storage`
+- `analytics_storage`
+
+Boolean hodnoty se normalizují na `granted` / `denied`.
+
+## BigQuery logging
+
+BigQuery logging je volitelné a ve výchozím stavu vypnuté.
+
+Šablona má v `access_bigquery` permission wildcard scope (`projectId: *`, `datasetId: *`, `tableId: *`, `operation: write`). GTM Custom Template permissions jsou statické a nejdou navázat na runtime hodnoty parametru.
+
+Efektivní omezení zápisu řešte přes IAM na sGTM service accountu:
+
+- service account by měl mít `roles/bigquery.dataEditor` jen na konkrétní dataset,
 - ideálně ve vlastním projektu mimo produkční data,
-- `logBigQueryProjectId` / `logBigQueryDatasetId` / `logBigQueryTableId` pak musí ukazovat na povolený target, jinak BigQuery odmítne insert a šablona chybu zaloguje.
-
-Kromě toho platí: BigQuery logování je celkově **opt-in** (`BigQuery Logs` = „Do not log to BigQuery" je default). Pokud funkci nepoužíváš, IAM na sGTM service account BigQuery oprávnění vůbec nedávej.
-
+- pokud BigQuery logging nepoužíváte, nedávejte service accountu BigQuery oprávnění.
 
 ## Troubleshooting
 
 | Problém | Řešení |
-|---------|--------|
-| Tag okamžitě selhává | Zkontrolujte, že `eventName` a `semId` jsou assigned a non-empty. |
-| Purchase events selhávají | Ověřte, že `orderId`, `currency`, `value` jsou vyplněny. `contents` je doporučené, ale ne povinné. |
-| Unknown event name warning | Ověřte název události vs. 18 supported events. Zapněte `strictEventValidation`. |
-| API errors | Ověřte SEM ID, payload structure, zkontrolujte error logs (logují se vždy). |
+|---|---|
+| Tag okamžitě selhává | Zkontrolujte, že je vyplněný `eventNameSelect` / `eventNameFromVariable` a `semId`. |
+| Warning na SEM ID | S2S SEM ID musí mít 24 znaků a obsahovat jen malá písmena a čísla. |
+| Purchase selhává | Po všech vrstvách musí existovat `order_id`, `currency` a `value`. |
+| Unknown event name warning | Název události musí být jeden z podporovaných SEM eventů. |
+| Chybí `event_url` | Vyplňte `Event URL`, zapněte GA4 Auto-Map s `page_location`, nebo zajistěte `Referer`. |
+| Chybí user_ids | Předávejte minimálně `sid` a `udid` ze `sul.js`, případně zahashované PII. |
+| User data se posílají jako raw PII | Hashování musí proběhnout na frontendu před příchodem do SGTM. Serverová šablona nehashuje. |
+| `sznaiid` se neukládá do cookie | Zkontrolujte, že je zapnuté `persistSznaiidCookie`, request obsahuje `?sznaiid=...` a tag běží mimo GTM preview ping. |
+| API errors | Zkontrolujte S2S SEM ID, payload shape a error logs. Při ladění vypněte optimistic scenario. |

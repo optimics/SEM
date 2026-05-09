@@ -39,6 +39,7 @@ ___TEMPLATE_PARAMETERS___
     "name": "eventNameSelect",
     "displayName": "Event Name",
     "selectItems": [
+      { "value": "auto", "displayValue": "Auto from GA4 (requires GA4 Auto-Map)" },
       { "value": "PageView", "displayValue": "PageView" },
       { "value": "ViewContent", "displayValue": "ViewContent" },
       { "value": "Purchase", "displayValue": "Purchase" },
@@ -57,23 +58,23 @@ ___TEMPLATE_PARAMETERS___
       { "value": "Schedule", "displayValue": "Schedule" },
       { "value": "StartTrial", "displayValue": "StartTrial" },
       { "value": "SubmitApplication", "displayValue": "SubmitApplication" },
-      { "value": "custom", "displayValue": "— Custom —" }
+      { "value": "from_variable", "displayValue": "— From variable —" }
     ],
     "simpleValueType": true,
     "defaultValue": "PageView",
-    "help": "Select a Seznam event name, or choose Custom to enter your own.",
+    "help": "Select a Seznam event name, choose 'From variable' to wire a GTM variable that resolves to a supported Seznam event name, or 'Auto from GA4' to derive the name from the inbound GA4 event_name (requires GA4 Auto-Map enabled below).",
     "valueValidators": [{ "type": "NON_EMPTY" }]
   },
   {
     "type": "TEXT",
-    "name": "eventNameCustom",
-    "displayName": "Custom Event Name",
+    "name": "eventNameFromVariable",
+    "displayName": "Event Name from Variable",
     "simpleValueType": true,
-    "help": "Enter a custom event name. Used when 'Custom' is selected above.",
+    "help": "Assign a GTM variable that resolves to one of the 18 supported Seznam event names (PageView, ViewContent, Purchase, Contact, AddToCart, AddToWishlist, InitiateCheckout, AddPaymentInfo, Search, CompleteRegistration, Lead, Subscribe, CustomizeProduct, Donate, FindLocation, Schedule, StartTrial, SubmitApplication). Values outside this allowlist log a WARN and fail the tag under 'Strict Event Validation'. Custom (non-allowlist) event names are NOT supported by Seznam.",
     "enablingConditions": [
       {
         "paramName": "eventNameSelect",
-        "paramValue": "custom",
+        "paramValue": "from_variable",
         "type": "EQUALS"
       }
     ],
@@ -82,9 +83,9 @@ ___TEMPLATE_PARAMETERS___
   {
     "type": "TEXT",
     "name": "semId",
-    "displayName": "SEM ID (Sklik Advertiser ID)",
+    "displayName": "S2S SEM ID (Sklik)",
     "simpleValueType": true,
-    "help": "Your SEM ID (shop ID in Sklik). Required for tracking.",
+    "help": "Your S2S SEM ID — visible in Sklik account settings under 'Show advanced settings'. This is a SEPARATE identifier from the SEM ID used by the frontend sul.js script. Required for S2S tracking.",
     "valueValidators": [
       {
         "type": "NON_EMPTY"
@@ -121,7 +122,7 @@ ___TEMPLATE_PARAMETERS___
     "name": "eventId",
     "displayName": "Event ID (optional)",
     "simpleValueType": true,
-    "help": "Unique event ID for deduplication. Assign a GTM variable that resolves to the frontend event ID."
+    "help": "Unique event ID for deduplication. To dedupe across frontend and server tracking, the SAME event_id MUST be used on both sides. The FE template (Šabatka) auto-generates 'Purchase__' + order_id for Purchase events when no explicit eventId is provided — to align, set the same value here (or a shared variable) for Purchase events."
   },
   {
     "type": "TEXT",
@@ -129,6 +130,52 @@ ___TEMPLATE_PARAMETERS___
     "displayName": "Event Time (optional)",
     "simpleValueType": true,
     "help": "Event timestamp in milliseconds. Seconds input is auto-upscaled to ms. Falls back to server time if empty."
+  },
+  {
+    "type": "GROUP",
+    "name": "autoMapGroup",
+    "displayName": "GA4 Auto-Map (opt-in)",
+    "groupStyle": "ZIPPY_CLOSED",
+    "subParams": [
+      {
+        "type": "CHECKBOX",
+        "name": "enableGa4AutoMap",
+        "checkboxText": "Enable GA4 auto-map",
+        "simpleValueType": true,
+        "defaultValue": false,
+        "help": "Reads inbound GA4 event and pre-fills SEM event_data, contents, event_url, event_id, and hashed sha256_* user_data only. Raw PII (email/phone/name/address) is never auto-forwarded — the template does not hash. Explicit fields below always override (Layer 0 precedence). Off by default to preserve v2.0 GA4 decoupling."
+      },
+      {
+        "type": "CHECKBOX",
+        "name": "autoMapEventName",
+        "checkboxText": "Auto-map event name (when Event Name is \"Auto from GA4\")",
+        "simpleValueType": true,
+        "defaultValue": false,
+        "enablingConditions": [
+          { "paramName": "enableGa4AutoMap", "paramValue": true, "type": "EQUALS" }
+        ]
+      },
+      {
+        "type": "CHECKBOX",
+        "name": "autoMapUserData",
+        "checkboxText": "Auto-map hashed user_data (sha256_* only)",
+        "simpleValueType": true,
+        "defaultValue": true,
+        "enablingConditions": [
+          { "paramName": "enableGa4AutoMap", "paramValue": true, "type": "EQUALS" }
+        ]
+      },
+      {
+        "type": "CHECKBOX",
+        "name": "autoMapEventData",
+        "checkboxText": "Auto-map event_data + contents",
+        "simpleValueType": true,
+        "defaultValue": true,
+        "enablingConditions": [
+          { "paramName": "enableGa4AutoMap", "paramValue": true, "type": "EQUALS" }
+        ]
+      }
+    ]
   },
   {
     "type": "GROUP",
@@ -163,14 +210,14 @@ ___TEMPLATE_PARAMETERS___
         "name": "userDataObject",
         "displayName": "User Data Object (optional)",
         "simpleValueType": true,
-        "help": "A GTM variable resolving to an object with user data fields (em, ph, fn, ln, etc.). Individual fields below override keys from this object."
+        "help": "A GTM variable resolving to an object with user data fields. SEM-native keys (em, ph, fn, ln, ge, db, ct, region, zp, sr, country, subscription_id, udid) are used as-is. Frontend-template aliases (email, phone, fname, lname, gender / g, birth / birthDate, postalCode / zip, subscription / subscriptionId) are translated to canonical names with a WARN log. All values must already be SHA-256 hashed — the server template never hashes. Individual fields below override keys from this object."
       },
       {
         "type": "TEXT",
         "name": "sid",
         "displayName": "SID (Seznam Identity)",
         "simpleValueType": true,
-        "help": "Seznam SID cookie value — primary user identifier for S2S. Obtain via window.sznIVA.IS.getIdentity('sid') after loading sem.js. Forward to SGTM as a GTM variable."
+        "help": "Seznam SID cookie value — primary user identifier for S2S. Obtain via window.sznIVA.IS.getIdentity('sid') after loading sul.js. Forward to SGTM as a GTM variable."
       },
       {
         "type": "TEXT",
@@ -452,6 +499,48 @@ ___TEMPLATE_PARAMETERS___
   },
   {
     "type": "GROUP",
+    "name": "serverCookiesGroup",
+    "displayName": "Server Cookies",
+    "groupStyle": "ZIPPY_CLOSED",
+    "subParams": [
+      {
+        "type": "CHECKBOX",
+        "name": "persistSznaiidCookie",
+        "checkboxText": "Persist sznaiid as first-party cookie",
+        "simpleValueType": true,
+        "defaultValue": true,
+        "help": "When enabled, reads sznaiid from URL (?sznaiid=...) and stores it as a 1P cookie named 'sznaiid'. Read on subsequent events when event_data.sznaiid is otherwise empty. Consent-free per Seznam docs (technical click ID, not PII). Disabling cookie persistence does NOT disable URL-based capture — sznaiid extracted from the URL is still injected into event_data.sznaiid."
+      },
+      {
+        "type": "SELECT",
+        "name": "persistSznaiidCookieMode",
+        "displayName": "Cookie write strategy",
+        "selectItems": [
+          { "value": "first_touch", "displayValue": "First touch (write only if no cookie exists)" },
+          { "value": "last_touch",  "displayValue": "Last touch (overwrite on every URL hit)" }
+        ],
+        "simpleValueType": true,
+        "defaultValue": "first_touch",
+        "enablingConditions": [
+          { "paramName": "persistSznaiidCookie", "paramValue": true, "type": "EQUALS" }
+        ]
+      },
+      {
+        "type": "TEXT",
+        "name": "sznaiidCookieMaxAge",
+        "displayName": "Cookie max-age (seconds)",
+        "simpleValueType": true,
+        "defaultValue": "7776000",
+        "valueValidators": [{ "type": "POSITIVE_NUMBER" }],
+        "enablingConditions": [
+          { "paramName": "persistSznaiidCookie", "paramValue": true, "type": "EQUALS" }
+        ],
+        "help": "Default 7776000 (90 days)."
+      }
+    ]
+  },
+  {
+    "type": "GROUP",
     "name": "bigQueryLogsGroup",
     "displayName": "BigQuery Logs",
     "groupStyle": "ZIPPY_CLOSED",
@@ -566,6 +655,10 @@ const logToConsole = require('logToConsole');
 const getRequestHeader = require('getRequestHeader');
 const makeNumber = require('makeNumber');
 const getType = require('getType');
+const getAllEventData = require('getAllEventData');
+const setCookie = require('setCookie');
+const getCookieValues = require('getCookieValues');
+const parseUrl = require('parseUrl');
 
 const ALLOWED_EVENTS = [
   'PageView', 'ViewContent', 'Purchase', 'Contact',
@@ -580,11 +673,50 @@ const NUMERIC_KEYS = [
   'predicted_ltv', 'goods_intention', 'goods_phase'
 ];
 
+// GA4 → SEM event-name map. Used only when eventNameSelect === 'auto' AND
+// autoMapEventName === true. Unknown GA4 names log a WARN and fall through.
+const GA4_EVENT_NAME_MAP = {
+  page_view: 'PageView',
+  view_item: 'ViewContent',
+  view_item_list: 'ViewContent',
+  select_item: 'ViewContent',
+  view_promotion: 'ViewContent',
+  search: 'Search',
+  view_search_results: 'Search',
+  add_to_cart: 'AddToCart',
+  add_to_wishlist: 'AddToWishlist',
+  begin_checkout: 'InitiateCheckout',
+  add_payment_info: 'AddPaymentInfo',
+  add_shipping_info: 'AddPaymentInfo',
+  purchase: 'Purchase',
+  generate_lead: 'Lead',
+  sign_up: 'CompleteRegistration',
+  login: 'CompleteRegistration',
+  contact: 'Contact',
+  subscribe: 'Subscribe'
+};
+
+// Static 1:1 map for fields without multi-source aliases.
+// `value` and `transaction_id` are handled by multi-source extractors below
+// (value: value/revenue/totalWithoutVat/sum-of-contents; order_id: transaction_id/id/orderNo).
+const GA4_EVENT_DATA_MAP = {
+  currency: 'currency',
+  tax: 'value_tax',
+  shipping: 'delivery_price',
+  payment_type: 'payment_type',
+  shipping_tier: 'delivery_type',
+  search_term: 'search_string'
+};
+
 const traceId = getRequestHeader('trace-id');
 
-const resolvedEventName = data.eventNameSelect === 'custom'
-  ? data.eventNameCustom
-  : data.eventNameSelect;
+// Auto-map: gather GA4-derived values once at top-level. Returns a `blank` shape when
+// enableGa4AutoMap=false, so downstream code can always read ga4.* without null-checks.
+const ga4 = extractFromEventData(data);
+
+const resolvedEventName = data.eventNameSelect === 'from_variable'
+  ? data.eventNameFromVariable
+  : (data.eventNameSelect === 'auto' ? ga4.resolvedEventName : data.eventNameSelect);
 
 const apiUrl = 'https://sem.seznam.cz/rtgconv';
 
@@ -592,7 +724,7 @@ const apiUrl = 'https://sem.seznam.cz/rtgconv';
 // `api.template_version` tracks our CHANGELOG release version. These are independent of the
 // GTM ___INFO___.version field, which is a GTM-internal stability flag constrained to 0 or 1.
 const API_CLIENT_VERSION = '1';
-const TEMPLATE_VERSION = '2.1.2';
+const TEMPLATE_VERSION = '2.2.1';
 
 // Parse JSON object/array fields once, up-front. `validate` decides severity, `buildPayload` consumes values.
 const parsed = {
@@ -604,7 +736,7 @@ const parsed = {
 };
 
 // Preflight validation
-const validationError = validate(data, parsed);
+const validationError = validate(data, parsed, ga4);
 if (validationError) {
   logToConsole('Seznam SEM [ERROR]: ' + validationError +
     ' | event=' + resolvedEventName + ' | trace=' + traceId);
@@ -629,7 +761,11 @@ log({
 sendHttpRequest(
   apiUrl,
   {
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'X-Client-Id': 'gtm-server-template-seznam-sem',
+      'X-Client-Version': TEMPLATE_VERSION
+    },
     method: 'POST'
   },
   JSON.stringify(payload)
@@ -675,7 +811,7 @@ if (data.useOptimisticScenario) {
  * Validation
  ******************************************************************************/
 
-function validate(data, parsed) {
+function validate(data, parsed, ga4) {
   if (!resolvedEventName) return 'eventName is required';
   if (!data.semId) return 'semId is required';
 
@@ -729,15 +865,21 @@ function validate(data, parsed) {
 
   // Purchase-specific required fields (per rtgconv.json: value, currency, order_id).
   // `contents` is recommended for retargeting/attribution but not required by the schema.
+  // GA4 auto-mapped values count toward satisfying these requirements — otherwise
+  // a Purchase event with all fields auto-filled from GA4 would falsely fail validation.
   if (resolvedEventName === 'Purchase') {
     var missing = [];
-    if (!data.orderId) missing.push('orderId');
-    if (!data.currency) missing.push('currency');
-    if (data.value === undefined || data.value === null || data.value === '') missing.push('value');
+    var effectiveOrderId = data.orderId || ga4.eventData.order_id;
+    var effectiveCurrency = data.currency || ga4.eventData.currency;
+    var hasManualValue = data.value !== undefined && data.value !== null && data.value !== '';
+    var effectiveValue = hasManualValue ? data.value : ga4.eventData.value;
+    if (!effectiveOrderId) missing.push('orderId');
+    if (!effectiveCurrency) missing.push('currency');
+    if (effectiveValue === undefined || effectiveValue === null || effectiveValue === '') missing.push('value');
     if (missing.length > 0) {
       return 'Purchase requires: ' + missing.join(', ');
     }
-    if (!data.contents) {
+    if (!data.contents && !ga4.contents) {
       logToConsole('Seznam SEM [WARN]: Purchase without contents is accepted by the API but strongly recommended for retargeting/attribution | trace=' + traceId);
     }
   }
@@ -746,12 +888,292 @@ function validate(data, parsed) {
 }
 
 /*******************************************************************************
+ * GA4 Auto-Map (opt-in)
+ ******************************************************************************/
+
+// Sandbox-safe NaN-detection: NaN !== NaN is the canonical NaN test.
+function isFiniteNumber(n) {
+  return n !== undefined && n !== null && n === n;
+}
+
+// FE-parity helper: returns first defined value from candidates array, optionally
+// coerced to a target type. undefined, null, '', and values that fail numeric
+// coercion (NaN) are SKIPPED so fallback candidates can be tried.
+function getFirstValue(candidates, targetType) {
+  for (var i = 0; i < candidates.length; i++) {
+    var v = candidates[i];
+    if (v === undefined || v === null || v === '') continue;
+    if (targetType === 'string') return '' + v;
+    if (targetType === 'number') {
+      var num = makeNumber(v);
+      if (isFiniteNumber(num)) return num;
+      continue;
+    }
+    if (targetType === 'integer') {
+      var n = makeNumber(v);
+      if (isFiniteNumber(n)) return Math.floor(n);
+      continue;
+    }
+    return v;
+  }
+  return undefined;
+}
+
+// FE-parity helper: round to 2 decimal places. Returns undefined for invalid
+// input so callers don't accidentally forward a non-number to the wire
+// (JSON.stringify drops undefined keys).
+function roundTo2(n) {
+  if (n === undefined || n === null) return undefined;
+  var num = makeNumber(n);
+  if (!isFiniteNumber(num)) return undefined;
+  return Math.round(num * 100) / 100;
+}
+
+// Category resolution priority (exclusive, mirrors FE template):
+//   1. `category` (string, possibly slash-separated → MeasureHive)
+//   2. `currentCategory` || `defaultCategory` (Shoptet)
+//   3. `item_category` ... `item_category5` joined with ' | ' (GA4 EE chain)
+// Returns undefined when no source matches.
+function buildItemCategory(it) {
+  if (it.category && getType(it.category) === 'string') {
+    if (it.category.indexOf('/') !== -1) {
+      var parts = [];
+      var split = it.category.split('/');
+      for (var s = 0; s < split.length; s++) if (split[s]) parts.push(split[s]);
+      return parts.length > 0 ? parts.join(' | ') : undefined;
+    }
+    return it.category;
+  }
+  // Shoptet's currentCategory / defaultCategory can be an array (FE-template parity).
+  // Without explicit array handling, '' + ['A','B'] would yield 'A,B' instead of 'A | B'.
+  if (it.currentCategory) {
+    return getType(it.currentCategory) === 'array'
+      ? it.currentCategory.join(' | ')
+      : '' + it.currentCategory;
+  }
+  if (it.defaultCategory) {
+    return getType(it.defaultCategory) === 'array'
+      ? it.defaultCategory.join(' | ')
+      : '' + it.defaultCategory;
+  }
+  var ee = [];
+  if (it.item_category)  ee.push(it.item_category);
+  if (it.item_category2) ee.push(it.item_category2);
+  if (it.item_category3) ee.push(it.item_category3);
+  if (it.item_category4) ee.push(it.item_category4);
+  if (it.item_category5) ee.push(it.item_category5);
+  return ee.length > 0 ? ee.join(' | ') : undefined;
+}
+
+// SAFETY: only map ALREADY-HASHED sha256_* variants. The template's contract is
+// "we never hash"; raw email/phone/name/address from GA4 would leak unhashed PII
+// over the wire to Seznam, which expects SHA-256-of-normalized inputs.
+// Raw PII auto-mapping is OUT OF SCOPE for v2.2.0 — would require sha256Sync,
+// normalization, and dedicated tests as a separate feature.
+function extractGa4UserData(ev) {
+  var out = {};
+  var ud = (getType(ev.user_data) === 'object') ? ev.user_data : {};
+  var addrRaw = ud.address;
+  var addr = {};
+  if (getType(addrRaw) === 'object') addr = addrRaw;
+  else if (getType(addrRaw) === 'array' && addrRaw.length > 0) addr = addrRaw[0] || {};
+
+  if (ud.sha256_email_address) out.em = ud.sha256_email_address;
+  if (ud.sha256_phone_number)  out.ph = ud.sha256_phone_number;
+  if (addr.sha256_first_name)  out.fn = addr.sha256_first_name;
+  if (addr.sha256_last_name)   out.ln = addr.sha256_last_name;
+  // Address fields (city/region/postal/country/street) are also PII per Seznam
+  // schema — they require hashing too. Skip auto-mapping in v2.2.0.
+  return out;
+}
+
+function extractFromEventData(data) {
+  var blank = { eventData: {}, userData: {}, contents: null, eventUrl: '', eventId: '', resolvedEventName: '' };
+  if (!data.enableGa4AutoMap) return blank;
+  var ev = getAllEventData();
+  if (getType(ev) !== 'object') return blank;
+
+  var out = { eventData: {}, userData: {}, contents: null, eventUrl: '', eventId: '', resolvedEventName: '' };
+
+  // event_url / event_id are always extracted when auto-map is on — they are
+  // top-level payload fields, not gated by the per-section sub-toggles.
+  if (ev.page_location) out.eventUrl = ev.page_location;
+  if (ev.event_id) out.eventId = ev.event_id;
+  else if (ev.transaction_id) out.eventId = ev.transaction_id;
+
+  if (data.autoMapEventName && ev.event_name) {
+    if (GA4_EVENT_NAME_MAP.hasOwnProperty(ev.event_name)) {
+      out.resolvedEventName = GA4_EVENT_NAME_MAP[ev.event_name];
+    } else {
+      logToConsole('Seznam SEM [WARN]: GA4 event ' + ev.event_name +
+        ' has no SEM mapping | trace=' + traceId);
+    }
+  }
+
+  // Explicit-false check: defaultValue=true may not hydrate into existing instances
+  // on template upgrade. Treat undefined as default ON when master toggle is enabled.
+  if (data.autoMapEventData !== false) {
+    // Static 1:1 fields (currency, tax→value_tax, shipping→delivery_price, etc.)
+    for (var k in GA4_EVENT_DATA_MAP) {
+      if (GA4_EVENT_DATA_MAP.hasOwnProperty(k) && ev.hasOwnProperty(k) &&
+          ev[k] !== undefined && ev[k] !== null && ev[k] !== '') {
+        out.eventData[GA4_EVENT_DATA_MAP[k]] = ev[k];
+      }
+    }
+
+    // Multi-source order_id: transaction_id (GA4 standard) || id || orderNo (Shoptet).
+    var effectiveOrderId = getFirstValue([ev.transaction_id, ev.id, ev.orderNo], 'string');
+    if (effectiveOrderId) out.eventData.order_id = effectiveOrderId;
+
+    // Items first (needed for sum-of-contents value fallback below).
+    if (getType(ev.items) === 'array' && ev.items.length > 0) {
+      var skipped = 0;
+      var contents = [];
+      for (var i = 0; i < ev.items.length; i++) {
+        var it = ev.items[i];
+        if (!it) { skipped++; continue; }
+        // Multi-source item id: item_id (GA4 EE) || id (Shoptet/legacy).
+        var itemId = getFirstValue([it.item_id, it.id], 'string');
+        if (!itemId) { skipped++; continue; }
+        var c = { id: itemId };
+
+        var itemName = getFirstValue([it.item_name, it.name], 'string');
+        if (itemName) c.content_name = itemName;
+
+        // Multi-source unit_price: price || priceWithVat || fullPrice.
+        var price = getFirstValue([it.price, it.priceWithVat, it.fullPrice], 'number');
+        if (price !== undefined) {
+          var rounded = roundTo2(price);
+          if (rounded !== undefined) c.unit_price = rounded;
+        }
+
+        // Quantity defaults to 1 when missing or non-numeric.
+        c.quantity = getFirstValue([it.quantity, 1], 'integer');
+
+        var cat = buildItemCategory(it);
+        if (cat) c.content_category = cat;
+
+        contents.push(c);
+      }
+      if (contents.length > 0) out.contents = contents;
+      if (skipped > 0) {
+        logToConsole('Seznam SEM [WARN]: ' + skipped +
+          ' GA4 items skipped (missing item_id) | trace=' + traceId);
+      }
+    }
+
+    // Multi-source value: value (GA4 standard) || revenue || totalWithoutVat.
+    // If still undefined and contents are auto-mapped, sum unit_price * quantity.
+    // sum=0 is a legitimate value (matches validate()'s Purchase check that allows 0).
+    var effectiveValue = getFirstValue([ev.value, ev.revenue, ev.totalWithoutVat], 'number');
+    if (effectiveValue === undefined && out.contents) {
+      var sum = 0;
+      var summed = false;
+      for (var ci = 0; ci < out.contents.length; ci++) {
+        var contItem = out.contents[ci];
+        if (contItem.unit_price !== undefined && contItem.quantity !== undefined) {
+          sum += contItem.unit_price * contItem.quantity;
+          summed = true;
+        }
+      }
+      if (summed) effectiveValue = sum;
+    }
+    if (effectiveValue !== undefined) {
+      var roundedValue = roundTo2(effectiveValue);
+      if (roundedValue !== undefined) out.eventData.value = roundedValue;
+    }
+  }
+
+  // Explicit-false check: see comment above on autoMapEventData.
+  if (data.autoMapUserData !== false) out.userData = extractGa4UserData(ev);
+  return out;
+}
+
+/*******************************************************************************
+ * sznaiid cookie + URL extraction
+ ******************************************************************************/
+
+// Try one URL; return sznaiid value or '' if not found / preview ping / unparseable.
+function extractFromSingleUrl(url) {
+  if (!url) return '';
+  // FB CAPI ref pattern for preview-ping guard (sandbox-safe; matches at offset 0).
+  if (url.lastIndexOf('https://gtm-msr.appspot.com/', 0) === 0) return '';
+  var parsed = parseUrl(url);
+  if (!parsed || !parsed.searchParams) return '';
+  var v = parsed.searchParams.sznaiid;
+  if (getType(v) === 'array') v = v[0];
+  return v || '';
+}
+
+// Try BOTH sources independently — page_location may exist but lack sznaiid
+// (e.g. SPA route change), in which case referer (the original landing URL)
+// is more likely to carry the click ID. First non-empty wins.
+//
+// EXCEPTION: when page_location indicates a GTM preview ping, treat the WHOLE
+// event as preview-context and short-circuit — do not fall back to referer.
+// Otherwise a preview hit on a real page with ?sznaiid=... in referer would
+// write a real attribution cookie during a debug session.
+function extractSznaiidFromUrl() {
+  var ev = getAllEventData();
+  var pageLoc = (getType(ev) === 'object' && ev.page_location) ? ev.page_location : '';
+  if (pageLoc && pageLoc.lastIndexOf('https://gtm-msr.appspot.com/', 0) === 0) return '';
+  return extractFromSingleUrl(pageLoc) ||
+         extractFromSingleUrl(getRequestHeader('referer')) ||
+         '';
+}
+
+// Resolves the sznaiid value to inject into payload from one of three sources,
+// in order: cookie (if persistence enabled and cookie exists), URL (always tried),
+// returning '' if none.
+//
+// Side effect: when persistSznaiidCookie=true AND a fresh sznaiid is in the URL,
+// writes the cookie according to first_touch / last_touch mode.
+//
+// IMPORTANT: when persistSznaiidCookie=false, no cookie is read or written —
+// but URL-extracted sznaiid is STILL returned and injected into event_data.sznaiid.
+// Disabling cookie persistence does not disable URL-based attribution capture.
+function resolveSznaiidFromCookieOrUrl() {
+  var fromUrl = extractSznaiidFromUrl();
+  // Explicit-false check: GTM may not hydrate the new parameter's defaultValue=true
+  // into existing tag instances on template upgrade. Treat undefined as default ON.
+  if (data.persistSznaiidCookie === false) return fromUrl || '';
+
+  var cookieVals = getCookieValues('sznaiid');
+  var existing = (getType(cookieVals) === 'array' && cookieVals.length > 0) ? cookieVals[0] : '';
+
+  var maxAge = makeNumber(data.sznaiidCookieMaxAge);
+  if (!maxAge || maxAge <= 0) maxAge = 7776000;
+
+  var shouldWrite = !!fromUrl &&
+    (data.persistSznaiidCookieMode === 'last_touch' || !existing);
+
+  if (shouldWrite) {
+    setCookie('sznaiid', fromUrl, {
+      domain: 'auto',
+      path: '/',
+      samesite: 'Lax',
+      secure: true,
+      'max-age': maxAge,
+      HttpOnly: false
+    });
+    return fromUrl;
+  }
+  return existing || fromUrl || '';
+}
+
+/*******************************************************************************
  * Payload builders
  ******************************************************************************/
 
 function buildPayload(data, parsed) {
   var eventTime = normalizeEventTime(data.eventTime);
-  var eventUrl = data.eventUrl || getRequestHeader('referer') || '';
+  var eventUrl = data.eventUrl || ga4.eventUrl || getRequestHeader('referer') || '';
+
+  // Spec-conformance WARN: docs mark event_url as required.
+  if (!eventUrl) {
+    logToConsole('Seznam SEM [WARN]: event_url is empty (no eventUrl, ga4.eventUrl, or referer); ' +
+      'docs mark it required | trace=' + traceId);
+  }
 
   var payload = {
     event_name: resolvedEventName,
@@ -768,7 +1190,7 @@ function buildPayload(data, parsed) {
     }
   };
 
-  addIfPresent(payload, 'event_id', data.eventId);
+  addIfPresent(payload, 'event_id', data.eventId || ga4.eventId);
 
   var consentMode = buildConsentMode(parsed.consent.value);
   if (hasProperties(consentMode)) {
@@ -780,6 +1202,10 @@ function buildPayload(data, parsed) {
   var userData = buildUserData(data, parsed.userData.value);
   if (hasProperties(userData)) {
     payload.user_ids = { user_data: userData };
+  } else {
+    // Spec-conformance WARN: docs mark user_ids as required.
+    logToConsole('Seznam SEM [WARN]: payload has no user_ids.user_data ' +
+      '(no sid/udid/hashed-PII present); Seznam may reject or down-rank | trace=' + traceId);
   }
 
   if (data.sendS2sHeaders &&
@@ -852,12 +1278,82 @@ function buildS2sHeaders() {
   return headers;
 }
 
+// Local helper: treats undefined, null, and '' as "not defined".
+// Used for alias precedence ("canonical wins when non-empty").
+function isUserDataDefined(v) {
+  return v !== undefined && v !== null && v !== '';
+}
+
+// Maps FE-template alias keys → canonical SEM wire keys.
+// Use an ordered ARRAY (not an object) because order matters when multiple
+// aliases resolve to the same canonical (e.g. gender vs g): the entry listed
+// FIRST wins. Object iteration order in the GTM sandbox is "should-be-stable"
+// but an explicit array removes the should.
+const USER_DATA_ALIAS_MAP = [
+  { alias: 'email',          canonical: 'em' },
+  { alias: 'phone',          canonical: 'ph' },
+  { alias: 'fname',          canonical: 'fn' },
+  { alias: 'lname',          canonical: 'ln' },
+  { alias: 'gender',         canonical: 'ge' },
+  { alias: 'g',              canonical: 'ge' },
+  { alias: 'birth',          canonical: 'db' },
+  { alias: 'birthDate',      canonical: 'db' },
+  { alias: 'postalCode',     canonical: 'zp' },
+  { alias: 'zip',            canonical: 'zp' },
+  { alias: 'subscription',   canonical: 'subscription_id' },
+  { alias: 'subscriptionId', canonical: 'subscription_id' }
+];
+
+function isAliasKey(key) {
+  for (var i = 0; i < USER_DATA_ALIAS_MAP.length; i++) {
+    if (USER_DATA_ALIAS_MAP[i].alias === key) return true;
+  }
+  return false;
+}
+
+// Builds a fresh normalized object from a userDataObject input.
+// - Non-alias keys are copied verbatim (Pass 1).
+// - Alias keys are NEVER copied to output; they are translated to canonical (Pass 2).
+// - WARN logs once per alias key that is present AND non-empty, regardless of
+//   whether canonical wins — this helps users discover canonical names.
+// - Canonical wins when non-empty (uses isUserDataDefined).
+function normalizeUserDataObject(source) {
+  if (!source) return source;
+  var out = {};
+
+  // Pass 1: copy non-alias keys verbatim — canonical values land first.
+  for (var key in source) {
+    if (!source.hasOwnProperty(key)) continue;
+    if (isAliasKey(key)) continue;
+    out[key] = source[key];
+  }
+
+  // Pass 2: process aliases in array order (deterministic).
+  for (var i = 0; i < USER_DATA_ALIAS_MAP.length; i++) {
+    var entry = USER_DATA_ALIAS_MAP[i];
+    if (!source.hasOwnProperty(entry.alias)) continue;
+    var aliasVal = source[entry.alias];
+    if (!isUserDataDefined(aliasVal)) continue;
+    logToConsole('Seznam SEM [WARN]: userDataObject.' + entry.alias +
+      ' is a frontend-template alias - prefer canonical key "' + entry.canonical +
+      '" for clarity | trace=' + traceId);
+    if (!isUserDataDefined(out[entry.canonical])) {
+      out[entry.canonical] = aliasVal;
+    }
+  }
+
+  return out;
+}
+
 function buildUserData(data, parsedUserDataObject) {
   var userData = {};
 
-  // Layer 1: object variable
+  // Layer 0: GA4 auto-mapped sha256_* fields (no-op when auto-map disabled).
+  mergeObject(userData, ga4.userData);
+
+  // Layer 1: object variable, with FE-template alias normalization.
   if (parsedUserDataObject) {
-    mergeObject(userData, parsedUserDataObject);
+    mergeObject(userData, normalizeUserDataObject(parsedUserDataObject));
   }
 
   // Layer 2: individual fields
@@ -886,10 +1382,18 @@ function buildUserData(data, parsedUserDataObject) {
 function buildEventData(data, parsedEventDataObject, parsedContents, parsedProductIds) {
   var ed = {};
 
+  // Layer 0: GA4 auto-mapped fields (no-op when auto-map disabled).
+  mergeObject(ed, ga4.eventData);
+
   // Layer 1: object variable
   if (parsedEventDataObject) {
     mergeObject(ed, parsedEventDataObject);
   }
+
+  // Layer 1b: sznaiid fallback from cookie / URL.
+  // Manual data.sznaiid (Layer 2 below) overrides this.
+  var cookieSznaiid = resolveSznaiidFromCookieOrUrl();
+  if (cookieSznaiid && !ed.sznaiid) ed.sznaiid = cookieSznaiid;
 
   // Always set sem_id
   ed.sem_id = data.semId;
@@ -936,8 +1440,11 @@ function buildEventData(data, parsedEventDataObject, parsedContents, parsedProdu
   }
 
   // Contents: already parsed upstream. Empty array is schema-valid and passed through.
+  // GA4 auto-mapped contents act as Layer 0 fallback when no manual contents provided.
   if (parsedContents !== null && parsedContents !== undefined) {
     ed.contents = parsedContents;
+  } else if (ga4.contents) {
+    ed.contents = ga4.contents;
   }
 
   // Layer 3: override table (with typed coercion for numeric keys)
@@ -948,6 +1455,19 @@ function buildEventData(data, parsedEventDataObject, parsedContents, parsedProdu
   if (ed.contents !== undefined && ed.contents !== null && !ed.content_type) {
     ed.content_type = 'product';
     logToConsole('Seznam SEM [WARN]: contents present without content_type; defaulting content_type=product | trace=' + traceId);
+  }
+
+  // FE-parity convenience: CompleteRegistration defaults to status=true when
+  // nothing in any layer has set it. Fires AFTER all layers (object → individual → overrides).
+  // CAVEAT (override table behavior): applyOverrides() drops rows where row.value is
+  // falsy AND does not boolean-coerce. Consequences for this default:
+  //   - Override row with row.value = "false" (string) suppresses the default but is
+  //     sent as the STRING "false", not boolean false.
+  //   - Override row with row.value = false (boolean) is dropped entirely → default fires.
+  // To explicitly send status:false to Seznam, use eventDataObject (Layer 1) or the
+  // statusEnabled+status template fields (Layer 2) — both are boolean-correct.
+  if (resolvedEventName === 'CompleteRegistration' && ed.status === undefined) {
+    ed.status = true;
   }
 
   return ed;
@@ -1118,6 +1638,96 @@ function logToBigQuery(requestInfo, responseInfo) {
 ___SERVER_PERMISSIONS___
 
 [
+  {
+    "instance": {
+      "key": {
+        "publicId": "read_event_data",
+        "versionId": "1"
+      },
+      "param": [
+        {
+          "key": "eventDataAccess",
+          "value": {
+            "type": 1,
+            "string": "any"
+          }
+        }
+      ]
+    },
+    "clientAnnotations": {
+      "isEditedByUser": true
+    },
+    "isRequired": true
+  },
+  {
+    "instance": {
+      "key": {
+        "publicId": "set_cookies",
+        "versionId": "1"
+      },
+      "param": [
+        {
+          "key": "allowedCookies",
+          "value": {
+            "type": 2,
+            "listItem": [
+              {
+                "type": 3,
+                "mapKey": [
+                  { "type": 1, "string": "name" },
+                  { "type": 1, "string": "domain" },
+                  { "type": 1, "string": "path" },
+                  { "type": 1, "string": "secure" },
+                  { "type": 1, "string": "session" }
+                ],
+                "mapValue": [
+                  { "type": 1, "string": "sznaiid" },
+                  { "type": 1, "string": "*" },
+                  { "type": 1, "string": "*" },
+                  { "type": 1, "string": "any" },
+                  { "type": 1, "string": "any" }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "clientAnnotations": {
+      "isEditedByUser": true
+    },
+    "isRequired": true
+  },
+  {
+    "instance": {
+      "key": {
+        "publicId": "get_cookies",
+        "versionId": "1"
+      },
+      "param": [
+        {
+          "key": "cookieAccess",
+          "value": {
+            "type": 1,
+            "string": "specific"
+          }
+        },
+        {
+          "key": "cookieNames",
+          "value": {
+            "type": 2,
+            "listItem": [
+              { "type": 1, "string": "sznaiid" }
+            ]
+          }
+        }
+      ]
+    },
+    "clientAnnotations": {
+      "isEditedByUser": true
+    },
+    "isRequired": true
+  },
   {
     "instance": {
       "key": {
@@ -1560,8 +2170,8 @@ scenarios:
   code: |-
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     runCode({
-      eventNameSelect: 'custom',
-      eventNameCustom: 'Foo',
+      eventNameSelect: 'from_variable',
+      eventNameFromVariable: 'Foo',
       semId: 'abcdefghijklmnopqrstuvwx',
       strictEventValidation: true
     });
@@ -1572,8 +2182,8 @@ scenarios:
   code: |-
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     runCode({
-      eventNameSelect: 'custom',
-      eventNameCustom: 'Foo',
+      eventNameSelect: 'from_variable',
+      eventNameFromVariable: 'Foo',
       semId: 'abcdefghijklmnopqrstuvwx',
       strictEventValidation: false,
       useOptimisticScenario: true
@@ -1820,12 +2430,819 @@ scenarios:
     assertThat(capturedBody.event_data.currency).isEqualTo('EUR');
     callLater(() => { assertApi('gtmOnSuccess').wasCalled(); });
 
+- name: sznaiid extracted from referer URL and injected into payload (v22 cookie-1)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    // page_location empty so referer fallback path is exercised.
+    mock('getAllEventData', () => ({}));
+    mock('getRequestHeader', (name) => name === 'referer' ? 'https://shop.example/lp?sznaiid=ABC123' : undefined);
+    mock('getCookieValues', () => []);
+    mock('setCookie', () => {});
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.sznaiid).isEqualTo('ABC123');
+
+- name: sznaiid cookie written first_touch when none exists (v22 cookie-2)
+  code: |-
+    let capturedCookieWrite;
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    mock('getAllEventData', () => ({ page_location: 'https://shop.example/lp?sznaiid=NEWVAL' }));
+    mock('getCookieValues', () => []);
+    mock('setCookie', (name, value, options) => { capturedCookieWrite = { name, value, options }; });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedCookieWrite.name).isEqualTo('sznaiid');
+    assertThat(capturedCookieWrite.value).isEqualTo('NEWVAL');
+    assertThat(capturedCookieWrite.options.samesite).isEqualTo('Lax');
+    assertThat(capturedCookieWrite.options.secure).isEqualTo(true);
+
+- name: sznaiid cookie NOT overwritten on second event (first_touch) (v22 cookie-3)
+  code: |-
+    let setCookieCalled = false;
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    mock('getAllEventData', () => ({ page_location: 'https://shop.example/lp?sznaiid=NEWVAL' }));
+    mock('getCookieValues', (name) => name === 'sznaiid' ? ['EXISTING'] : []);
+    mock('setCookie', () => { setCookieCalled = true; });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      useOptimisticScenario: false
+    });
+    assertThat(setCookieCalled).isEqualTo(false);
+
+- name: sznaiid cookie overwritten under last_touch mode (v22 cookie-4)
+  code: |-
+    let capturedCookieWrite;
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    mock('getAllEventData', () => ({ page_location: 'https://shop.example/lp?sznaiid=NEWVAL' }));
+    mock('getCookieValues', (name) => name === 'sznaiid' ? ['EXISTING'] : []);
+    mock('setCookie', (name, value, options) => { capturedCookieWrite = { name, value, options }; });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'last_touch',
+      sznaiidCookieMaxAge: '7776000',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedCookieWrite.value).isEqualTo('NEWVAL');
+
+- name: Manual data sznaiid wins over cookie value (v22 cookie-5)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({}));
+    mock('getRequestHeader', () => undefined);
+    mock('getCookieValues', (name) => name === 'sznaiid' ? ['FROM_COOKIE'] : []);
+    mock('setCookie', () => {});
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      sznaiid: 'MANUAL_VAL',
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.sznaiid).isEqualTo('MANUAL_VAL');
+
+- name: URL with no sznaiid + cookie present - cookie value injected (v22 cookie-6)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ page_location: 'https://shop.example/lp' }));
+    mock('getRequestHeader', () => undefined);
+    mock('getCookieValues', (name) => name === 'sznaiid' ? ['COOKIE_ONLY'] : []);
+    mock('setCookie', () => {});
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.sznaiid).isEqualTo('COOKIE_ONLY');
+
+- name: persistSznaiidCookie disabled - URL value still injected, setCookie not called (v22 cookie-7)
+  code: |-
+    let setCookieCalled = false;
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ page_location: 'https://shop.example/lp?sznaiid=URLONLY' }));
+    mock('getCookieValues', () => []);
+    mock('setCookie', () => { setCookieCalled = true; });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      persistSznaiidCookie: false,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.sznaiid).isEqualTo('URLONLY');
+    assertThat(setCookieCalled).isEqualTo(false);
+
+- name: gtm-msr preview URL - sznaiid not extracted, cookie not written (v22 cookie-8)
+  code: |-
+    let setCookieCalled = false;
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ page_location: 'https://gtm-msr.appspot.com/preview?sznaiid=PREVIEW' }));
+    mock('getRequestHeader', () => undefined);
+    mock('getCookieValues', () => []);
+    mock('setCookie', () => { setCookieCalled = true; });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.sznaiid).isUndefined();
+    assertThat(setCookieCalled).isEqualTo(false);
+
+- name: page_location lacks sznaiid but referer has it - referer value used (v22 cookie-9)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ page_location: 'https://shop.example/cart' }));
+    mock('getRequestHeader', (name) => name === 'referer' ? 'https://shop.example/lp?sznaiid=FROMREF' : undefined);
+    mock('getCookieValues', () => []);
+    mock('setCookie', () => {});
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.sznaiid).isEqualTo('FROMREF');
+
+- name: gtm-msr page_location short-circuits referer fallback (v22 cookie-10)
+  code: |-
+    let setCookieCalled = false;
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    // page_location is a preview ping; referer happens to carry a real sznaiid.
+    // The whole event is preview-context — must NOT inject or write the cookie.
+    mock('getAllEventData', () => ({ page_location: 'https://gtm-msr.appspot.com/preview' }));
+    mock('getRequestHeader', (name) => name === 'referer' ? 'https://shop.example/lp?sznaiid=REAL_BUT_PREVIEW' : undefined);
+    mock('getCookieValues', () => []);
+    mock('setCookie', () => { setCookieCalled = true; });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.sznaiid).isUndefined();
+    assertThat(setCookieCalled).isEqualTo(false);
+
+- name: Auto-map disabled by default - GA4 fields ignored (v22 automap-1)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      currency: 'CZK', value: 999, transaction_id: 'TX-IGNORED',
+      items: [{ item_id: 'X', price: 999, quantity: 1 }]
+    }));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.currency).isUndefined();
+    assertThat(capturedBody.event_data.value).isUndefined();
+    assertThat(capturedBody.event_data.order_id).isUndefined();
+    assertThat(capturedBody.event_data.contents).isUndefined();
+
+- name: Auto-map Purchase - GA4 transaction_id maps to order_id, items array maps to contents (v22 automap-2)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      event_name: 'purchase',
+      currency: 'CZK', value: 1234, transaction_id: 'TX-AUTO',
+      items: [
+        { item_id: 'A', item_name: 'Phone', item_category: 'electronics', price: '1234', quantity: '1' }
+      ]
+    }));
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.order_id).isEqualTo('TX-AUTO');
+    assertThat(capturedBody.event_data.currency).isEqualTo('CZK');
+    assertThat(capturedBody.event_data.value).isEqualTo(1234);
+    assertThat(capturedBody.event_data.contents.length).isEqualTo(1);
+    assertThat(capturedBody.event_data.contents[0].id).isEqualTo('A');
+    assertThat(capturedBody.event_data.contents[0].content_name).isEqualTo('Phone');
+    assertThat(capturedBody.event_data.contents[0].unit_price).isEqualTo(1234);
+    assertThat(capturedBody.event_data.contents[0].quantity).isEqualTo(1);
+
+- name: Auto-map respects manual override - manual orderId wins over GA4 transaction_id (v22 automap-3)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ transaction_id: 'TX-AUTO' }));
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      orderId: 'MANUAL-ORDER',
+      currency: 'CZK',
+      value: 100,
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.order_id).isEqualTo('MANUAL-ORDER');
+
+- name: Auto-map view_item maps to ViewContent when eventNameSelect is auto (v22 automap-4)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ event_name: 'view_item' }));
+    runCode({
+      eventNameSelect: 'auto',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventName: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_name).isEqualTo('ViewContent');
+
+- name: Auto-map skips items without item_id and warns (v22 automap-5)
+  code: |-
+    let capturedBody;
+    let warns = [];
+    mock('logToConsole', (msg) => { warns.push(msg); });
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      items: [
+        { item_id: 'GOOD', price: 10, quantity: 1 },
+        { item_name: 'no-id-item', price: 20, quantity: 1 }
+      ]
+    }));
+    runCode({
+      eventNameSelect: 'ViewContent',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.contents.length).isEqualTo(1);
+    assertThat(capturedBody.event_data.contents[0].id).isEqualTo('GOOD');
+    var foundWarn = false;
+    for (var i = 0; i < warns.length; i++) {
+      if (warns[i].indexOf('GA4 items skipped (missing item_id)') !== -1) { foundWarn = true; break; }
+    }
+    assertThat(foundWarn).isEqualTo(true);
+
+- name: Auto-map Purchase passes validate when manual orderId currency value blank (v22 automap-6)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      currency: 'CZK', value: 555, transaction_id: 'TX-VAL'
+    }));
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertApi('sendHttpRequest').wasCalled();
+    assertThat(capturedBody.event_data.order_id).isEqualTo('TX-VAL');
+    assertThat(capturedBody.event_data.value).isEqualTo(555);
+
+- name: Auto-map PII safety - raw email_address NOT propagated, only sha256 fields forwarded (v22 automap-7)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      user_data: {
+        email_address: 'raw@example.com',
+        phone_number: '+420606000000',
+        sha256_email_address: 'HASHED_EM',
+        address: { first_name: 'RAW', sha256_first_name: 'HASHED_FN' }
+      }
+    }));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapUserData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.em).isEqualTo('HASHED_EM');
+    assertThat(capturedBody.user_ids.user_data.fn).isEqualTo('HASHED_FN');
+    // Raw values must NEVER appear:
+    assertThat(JSON.stringify(capturedBody)).contains('HASHED_EM');
+    // Negative assertion: raw 'raw@example.com' is not in the payload anywhere.
+    var body = JSON.stringify(capturedBody);
+    var hasRawEmail = body.indexOf('raw@example.com') !== -1;
+    var hasRawPhone = body.indexOf('+420606000000') !== -1;
+    var hasRawFirstName = body.indexOf('"RAW"') !== -1;
+    assertThat(hasRawEmail).isEqualTo(false);
+    assertThat(hasRawPhone).isEqualTo(false);
+    assertThat(hasRawFirstName).isEqualTo(false);
+
+- name: WARN logged when event_url empty (v22 spec-1)
+  code: |-
+    let warns = [];
+    mock('logToConsole', (msg) => { warns.push(msg); });
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    // No eventUrl, no ga4.eventUrl (auto-map off), no referer header.
+    mock('getRequestHeader', (name) => name === 'trace-id' ? 'TRC' : undefined);
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      useOptimisticScenario: false
+    });
+    var found = false;
+    for (var i = 0; i < warns.length; i++) {
+      if (warns[i].indexOf('event_url is empty') !== -1) { found = true; break; }
+    }
+    assertThat(found).isEqualTo(true);
+
+- name: WARN logged when user_ids empty (v22 spec-2)
+  code: |-
+    let warns = [];
+    mock('logToConsole', (msg) => { warns.push(msg); });
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      useOptimisticScenario: false
+    });
+    var found = false;
+    for (var i = 0; i < warns.length; i++) {
+      if (warns[i].indexOf('no user_ids.user_data') !== -1) { found = true; break; }
+    }
+    assertThat(found).isEqualTo(true);
+
+- name: Outgoing request includes X-Client-Id and X-Client-Version headers (v221 headers-1)
+  code: |-
+    let capturedOpts;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedOpts = opts;
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedOpts.headers['X-Client-Id']).isEqualTo('gtm-server-template-seznam-sem');
+    assertThat(capturedOpts.headers['X-Client-Version']).isEqualTo('2.2.1');
+
+- name: userDataObject with FE aliases - email phone fname mapped to em ph fn (v221 alias-1)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userDataObject: { email: 'HASH_EM', phone: 'HASH_PH', fname: 'HASH_FN' },
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.em).isEqualTo('HASH_EM');
+    assertThat(capturedBody.user_ids.user_data.ph).isEqualTo('HASH_PH');
+    assertThat(capturedBody.user_ids.user_data.fn).isEqualTo('HASH_FN');
+    // Alias keys must NOT appear in payload at all.
+    var bodyStr = JSON.stringify(capturedBody);
+    assertThat(bodyStr.indexOf('"email"') === -1).isEqualTo(true);
+    assertThat(bodyStr.indexOf('"phone"') === -1).isEqualTo(true);
+    assertThat(bodyStr.indexOf('"fname"') === -1).isEqualTo(true);
+
+- name: userDataObject canonical key wins over alias - email A em B sends em B (v221 alias-2)
+  code: |-
+    let capturedBody;
+    let warns = [];
+    mock('logToConsole', (msg) => { warns.push(msg); });
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userDataObject: { email: 'A', em: 'B' },
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.em).isEqualTo('B');
+    // WARN still fires for alias presence regardless of canonical winning.
+    var foundWarn = false;
+    for (var i = 0; i < warns.length; i++) {
+      if (warns[i].indexOf('userDataObject.email') !== -1) { foundWarn = true; break; }
+    }
+    assertThat(foundWarn).isEqualTo(true);
+
+- name: userDataObject alias triggers WARN log (v221 alias-3)
+  code: |-
+    let warns = [];
+    mock('logToConsole', (msg) => { warns.push(msg); });
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userDataObject: { phone: 'HASH_VALUE' },
+      useOptimisticScenario: false
+    });
+    var foundWarn = false;
+    for (var i = 0; i < warns.length; i++) {
+      var m = warns[i];
+      if (m.indexOf('userDataObject.phone') !== -1 && m.indexOf('"ph"') !== -1) {
+        foundWarn = true;
+        break;
+      }
+    }
+    assertThat(foundWarn).isEqualTo(true);
+
+- name: Auto-map order_id falls back to id then orderNo (v221 automap-8)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    // Case 1: only `id` present
+    mock('getAllEventData', () => ({ id: 'FROM_ID' }));
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      currency: 'CZK',
+      value: 100,
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.order_id).isEqualTo('FROM_ID');
+
+- name: Auto-map order_id prefers transaction_id over orderNo (v221 automap-8b)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ transaction_id: 'TX', orderNo: 'NO' }));
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      currency: 'CZK',
+      value: 100,
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.order_id).isEqualTo('TX');
+
+- name: Auto-map order_id falls back to orderNo when transaction_id and id absent (v221 automap-8c)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ orderNo: 'SHOPTET_ORDER_42' }));
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      currency: 'CZK',
+      value: 100,
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.order_id).isEqualTo('SHOPTET_ORDER_42');
+
+- name: Auto-map value falls back to revenue when value missing (v221 automap-9)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ revenue: 250 }));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.value).isEqualTo(250);
+
+- name: Auto-map value falls back to totalWithoutVat when value and revenue missing (v221 automap-9b)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({ totalWithoutVat: 175 }));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.value).isEqualTo(175);
+
+- name: Auto-map value falls back to sum of contents when no value source (v221 automap-10)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      items: [
+        { item_id: 'A', price: 10, quantity: 2 },
+        { item_id: 'B', price: 5,  quantity: 1 }
+      ]
+    }));
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    // 10*2 + 5*1 = 25
+    assertThat(capturedBody.event_data.value).isEqualTo(25);
+
+- name: Auto-map value sum of zero-priced contents emits value 0 not undefined (v221 automap-10b)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    // Free items: unit_price 0, quantity 1. Sum is 0, which is a legitimate value.
+    mock('getAllEventData', () => ({
+      items: [
+        { item_id: 'FREE_A', price: 0, quantity: 1 },
+        { item_id: 'FREE_B', price: 0, quantity: 2 }
+      ]
+    }));
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      currency: 'CZK',
+      orderId: 'FREE_ORDER',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.value).isEqualTo(0);
+
+- name: Auto-map item id name and price fall back to aliases (v221 automap-11)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      items: [
+        { id: 'SHOPTET_ID', name: 'Shoptet Item', priceWithVat: 99, quantity: 1 }
+      ]
+    }));
+    runCode({
+      eventNameSelect: 'ViewContent',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.contents[0].id).isEqualTo('SHOPTET_ID');
+    assertThat(capturedBody.event_data.contents[0].content_name).isEqualTo('Shoptet Item');
+    assertThat(capturedBody.event_data.contents[0].unit_price).isEqualTo(99);
+
+- name: Auto-map quantity defaults to 1 when missing or non-numeric (v221 automap-12)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      items: [
+        { item_id: 'NOQTY', price: 10 },
+        { item_id: 'BADQTY', price: 10, quantity: 'abc' },
+        { item_id: 'STRQTY', price: 10, quantity: '3' }
+      ]
+    }));
+    runCode({
+      eventNameSelect: 'ViewContent',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.contents[0].quantity).isEqualTo(1);
+    assertThat(capturedBody.event_data.contents[1].quantity).isEqualTo(1);
+    assertThat(capturedBody.event_data.contents[2].quantity).isEqualTo(3);
+
+- name: Auto-map joins item_category through item_category5 with pipe separator (v221 automap-13)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      items: [
+        { item_id: 'GA4', item_category: 'A', item_category2: 'B', item_category3: 'C' },
+        { item_id: 'SLASH', category: 'X/Y/Z' },
+        { item_id: 'SHOPTET', currentCategory: 'CurrentCat' }
+      ]
+    }));
+    runCode({
+      eventNameSelect: 'ViewContent',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.contents[0].content_category).isEqualTo('A | B | C');
+    assertThat(capturedBody.event_data.contents[1].content_category).isEqualTo('X | Y | Z');
+    assertThat(capturedBody.event_data.contents[2].content_category).isEqualTo('CurrentCat');
+
+- name: Auto-map Shoptet currentCategory array joins with pipe separator (v221 automap-13b)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      items: [
+        { item_id: 'SHOPTET_ARR', currentCategory: ['Electronics', 'Phones', 'Smartphones'] },
+        { item_id: 'SHOPTET_DEF_ARR', defaultCategory: ['Books', 'Fiction'] }
+      ]
+    }));
+    runCode({
+      eventNameSelect: 'ViewContent',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.contents[0].content_category).isEqualTo('Electronics | Phones | Smartphones');
+    assertThat(capturedBody.event_data.contents[1].content_category).isEqualTo('Books | Fiction');
+
+- name: Auto-map rounds value and unit_price to 2 decimals (v221 automap-14)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getAllEventData', () => ({
+      value: 19.4567,
+      items: [{ item_id: 'A', price: 9.999, quantity: 1 }]
+    }));
+    runCode({
+      eventNameSelect: 'ViewContent',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      enableGa4AutoMap: true,
+      autoMapEventData: true,
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.value).isEqualTo(19.46);
+    assertThat(capturedBody.event_data.contents[0].unit_price).isEqualTo(10);
+
+- name: CompleteRegistration without statusEnabled defaults status to true (v221 status-1)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'CompleteRegistration',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.event_data.status).isEqualTo(true);
+
+- name: CompleteRegistration with explicit statusEnabled false keeps false (v221 status-2)
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    runCode({
+      eventNameSelect: 'CompleteRegistration',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      statusEnabled: true,
+      status: 'false',
+      useOptimisticScenario: false
+    });
+    // Layer 2 set ed.status = false; default check sees ed.status defined → does NOT fire.
+    assertThat(capturedBody.event_data.status).isEqualTo(false);
+
 
 ___NOTES___
 
+v2.2.1 — Polish on v2.2 line: broadened GA4 Auto-Map (multi-source order_id /
+value / item field aliases, multi-level item_category2..5 join, MeasureHive
+slash categories, Shoptet currentCategory/defaultCategory, quantity default 1,
+value and unit_price 2-decimal rounding, sum-of-contents value fallback);
+CompleteRegistration auto status=true (post-Layer-3; object/field false preserved; override table caveats documented);
+userDataObject alias normalization (FE-template aliases email/phone/fname/lname/
+gender/g/birth/birthDate/postalCode/zip/subscription/subscriptionId translated
+to canonical em/ph/fn/ln/ge/db/zp/subscription_id with WARN log; canonical
+wins when non-empty; alias keys never reach payload); X-Client-Id /
+X-Client-Version HTTP headers (diagnostic correlation with Seznam); S2S SEM ID
+wording; sul.js (was sem.js) correction; Custom event option REMOVED and replaced
+with "From variable" wiring (resolved value still validated against the 18-event
+allowlist; non-allowlist values are NOT supported by Seznam);
+Event ID dedup guidance; FE-vs-server doc section. No payload schema change,
+no new permissions. Auto-map remains opt-in.
+v2.2.0 — Added opt-in GA4 Auto-Map (off by default) and default-on sznaiid 1P cookie.
+Reintroduced read_event_data permission. NOTE: read_event_data is consumed even
+when GA4 Auto-Map is OFF, because the cookie path always calls getAllEventData()
+to read page_location. Added set_cookies/get_cookies permissions for sznaiid only.
+GA4 user_data auto-map covers ONLY sha256_* variants — raw PII auto-mapping is
+deliberately out of scope (template never hashes; would leak unhashed PII to Seznam).
+Added 2 spec-conformance WARN logs (event_url empty, user_ids empty) per S2S docs.
 v2.1.2 — Defaults content_type=product when contents is present without content_type.
 v2.1.1 — Hotfix for SGTM sandbox compatibility (charCodeAt removed).
 All Seznam payload fields are explicit template parameters.
-No GA4 coupling — template reads data.* only.
+GA4 coupling is opt-in via Auto-Map (introduced v2.2.0); default behavior reads data.* only.
 PII hashing is the frontend's responsibility; server-side template is pass-through
 (exception: review_email is plain text by design).
