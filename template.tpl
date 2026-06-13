@@ -15,7 +15,6 @@ ___INFO___
   "displayName": "Seznam SEM Conversion API",
   "categories": [
     "ADVERTISING",
-    "ANALYTICS",
     "CONVERSIONS",
     "MARKETING"
   ],
@@ -1965,43 +1964,6 @@ ___SERVER_PERMISSIONS___
           "value": {
             "type": 1,
             "string": "all"
-          }
-        }
-      ]
-    },
-    "clientAnnotations": {
-      "isEditedByUser": true
-    },
-    "isRequired": true
-  },
-  {
-    "instance": {
-      "key": {
-        "publicId": "access_bigquery",
-        "versionId": "1"
-      },
-      "param": [
-        {
-          "key": "allowedTables",
-          "value": {
-            "type": 2,
-            "listItem": [
-              {
-                "type": 3,
-                "mapKey": [
-                  { "type": 1, "string": "projectId" },
-                  { "type": 1, "string": "datasetId" },
-                  { "type": 1, "string": "tableId" },
-                  { "type": 1, "string": "operation" }
-                ],
-                "mapValue": [
-                  { "type": 1, "string": "*" },
-                  { "type": 1, "string": "*" },
-                  { "type": 1, "string": "*" },
-                  { "type": 1, "string": "write" }
-                ]
-              }
-            ]
           }
         }
       ]
