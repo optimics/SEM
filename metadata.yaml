@@ -1,7 +1,7 @@
 homepage: https://www.optimics.cz
 documentation: https://github.com/optimics/SEM/blob/main/README.md
 versions:
-  - sha: 88ec63ab16b0cd59bde4671d0bcd732184ef630f
+  - sha: e0078391794b3831df193eccd13a4511883bc3de
     changeNotes: >-
       v2.2.x — GA4 Auto-Map, sznaiid first-party cookie, FE-template parity
       polish. Server-side template for sending events to the Seznam SEM
