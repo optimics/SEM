@@ -1984,7 +1984,23 @@ ___SERVER_PERMISSIONS___
           "key": "allowedTables",
           "value": {
             "type": 2,
-            "listItem": []
+            "listItem": [
+              {
+                "type": 3,
+                "mapKey": [
+                  { "type": 1, "string": "projectId" },
+                  { "type": 1, "string": "datasetId" },
+                  { "type": 1, "string": "tableId" },
+                  { "type": 1, "string": "operation" }
+                ],
+                "mapValue": [
+                  { "type": 1, "string": "*" },
+                  { "type": 1, "string": "*" },
+                  { "type": 1, "string": "*" },
+                  { "type": 1, "string": "write" }
+                ]
+              }
+            ]
           }
         }
       ]
