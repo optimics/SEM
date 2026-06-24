@@ -12,7 +12,7 @@ ___INFO___
   "type": "TAG",
   "id": "cvt_seznam_sem",
   "version": 1,
-  "displayName": "Seznam SEM Conversion API",
+  "displayName": "Seznam SEM (Server-Side)",
   "categories": [
     "ADVERTISING",
     "CONVERSIONS",
@@ -22,7 +22,7 @@ ___INFO___
     "id": "seznam_sem",
     "displayName": "Seznam SEM"
   },
-  "description": "Server-side Google Tag Manager template for sending events to Seznam.cz SEM (Seznam Event Measurement) API. Variable-driven — assign GTM variables to each field.",
+  "description": "Server-side Google Tag Manager template for sending conversion events to the Seznam.cz SEM (Seznam Event Measurement) API. Map data per field or via a single object variable, with optional GA4 auto-mapping, consent mode, sid/udid cookie fallback, and BigQuery logging.",
   "containerContexts": [
     "SERVER"
   ],
@@ -121,7 +121,7 @@ ___TEMPLATE_PARAMETERS___
     "name": "eventId",
     "displayName": "Event ID (optional)",
     "simpleValueType": true,
-    "help": "Unique event ID for deduplication. To dedupe across frontend and server tracking, the SAME event_id MUST be used on both sides. The FE template (Šabatka) auto-generates 'Purchase__' + order_id for Purchase events when no explicit eventId is provided — to align, set the same value here (or a shared variable) for Purchase events."
+    "help": "Unique event ID for deduplication. To dedupe across frontend and server tracking, the SAME event_id MUST be used on both sides. For Purchase events, frontend tracking commonly uses 'Purchase__' + order_id when no explicit event ID is set — to align, use the same value (or a shared variable) here."
   },
   {
     "type": "TEXT",
@@ -205,24 +205,56 @@ ___TEMPLATE_PARAMETERS___
     "groupStyle": "ZIPPY_CLOSED",
     "subParams": [
       {
+        "type": "SELECT",
+        "name": "userDataInputMode",
+        "displayName": "User Data input mode",
+        "macrosInSelect": false,
+        "selectItems": [
+          { "value": "object", "displayValue": "Object variable" },
+          { "value": "fields", "displayValue": "Individual fields" }
+        ],
+        "simpleValueType": true,
+        "defaultValue": "object",
+        "help": "Choose how to provide user data. 'Object variable': one GTM variable resolving to an object with SEM-native keys. 'Individual fields': map each field separately. Both produce the same payload; the cookie sid/udid fallback below applies to either mode."
+      },
+      {
         "type": "TEXT",
         "name": "userDataObject",
-        "displayName": "User Data Object (optional)",
+        "displayName": "User Data Object",
         "simpleValueType": true,
-        "help": "A GTM variable resolving to an object with user data fields. SEM-native keys (em, ph, fn, ln, ge, db, ct, region, zp, sr, country, subscription_id, udid) are used as-is. Frontend-template aliases (email, phone, fname, lname, gender / g, birth / birthDate, postalCode / zip, subscription / subscriptionId) are translated to canonical names with a WARN log. All values must already be SHA-256 hashed — the server template never hashes. Individual fields below override keys from this object."
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "object", "type": "EQUALS" }
+        ],
+        "help": "A GTM variable resolving to an object with user data fields. SEM-native keys (em, ph, fn, ln, ge, db, ct, region, zp, sr, country, subscription_id, sid, udid) are used as-is. Frontend-template aliases (email, phone, fname, lname, gender / g, birth / birthDate, postalCode / zip, subscription / subscriptionId) are translated to canonical names with a WARN log. GA4-shaped keys (email_address, phone_number, nested address) are NOT accepted and will be rejected by the API. All PII values must already be SHA-256 hashed — the server template never hashes."
       },
       {
         "type": "TEXT",
         "name": "sid",
         "displayName": "SID (Seznam Identity)",
         "simpleValueType": true,
-        "help": "Seznam SID cookie value — primary user identifier for S2S. Obtain via window.sznIVA.IS.getIdentity('sid') after loading sul.js. Forward to SGTM as a GTM variable."
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
+        "help": "Seznam SID cookie value — primary user identifier for S2S. Obtain via window.sznIVA.IS.getIdentity('sid') after loading sul.js, or leave empty to use the cookie fallback below."
+      },
+      {
+        "type": "TEXT",
+        "name": "userUdid",
+        "displayName": "UDID (udid)",
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
+        "help": "Unique user/device ID. Server-side template does not hash this value. If left empty and 'Auto-map sid & udid from request cookies' is on, it is read from the 'udid' cookie (the '<uuid>@<timestamp>' suffix is stripped to the canonical uuid)."
       },
       {
         "type": "TEXT",
         "name": "userEmail",
         "displayName": "Email (em)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of the normalized email (lowercase + trim). Hashing must be done on the frontend — the server-side template does not hash."
       },
       {
@@ -230,6 +262,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "userPhone",
         "displayName": "Phone (ph)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of the phone in E.164 format (e.g. +420606666666). Hashing must be done on the frontend."
       },
       {
@@ -237,6 +272,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "userFirstName",
         "displayName": "First Name (fn)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of the normalized first name (lowercase + trim). Hashing must be done on the frontend."
       },
       {
@@ -244,6 +282,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "userLastName",
         "displayName": "Last Name (ln)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of the normalized last name (lowercase + trim). Hashing must be done on the frontend."
       },
       {
@@ -251,6 +292,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "userGender",
         "displayName": "Gender (ge)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of 'm' / 'f' / 'o'. Hashing must be done on the frontend."
       },
       {
@@ -258,6 +302,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "userDob",
         "displayName": "Date of Birth (db)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of YYYYMMDD. Hashing must be done on the frontend."
       },
       {
@@ -265,6 +312,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "userCity",
         "displayName": "City (ct)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of the normalized city (lowercase + trim). Hashing must be done on the frontend."
       },
       {
@@ -272,6 +322,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "userRegion",
         "displayName": "Region / State (region)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of the normalized region/state (lowercase + trim). Hashing must be done on the frontend."
       },
       {
@@ -279,6 +332,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "userZip",
         "displayName": "Postal Code (zp)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of the trimmed ZIP/postal code. Hashing must be done on the frontend."
       },
       {
@@ -286,6 +342,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "userStreet",
         "displayName": "Street (sr)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of the normalized street (lowercase + trim). Hashing must be done on the frontend."
       },
       {
@@ -293,20 +352,27 @@ ___TEMPLATE_PARAMETERS___
         "name": "userCountry",
         "displayName": "Country",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Expected SHA-256 hash of ISO 3166-1 alpha-2 code (lowercase). Hashing must be done on the frontend."
       },
       {
         "type": "TEXT",
         "name": "userSubscriptionId",
         "displayName": "Subscription ID",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
-        "type": "TEXT",
-        "name": "userUdid",
-        "displayName": "UDID (udid)",
+        "type": "CHECKBOX",
+        "name": "autoMapIdsFromCookies",
+        "checkboxText": "Auto-map sid & udid from request cookies (fallback)",
         "simpleValueType": true,
-        "help": "Unique user/device ID (cookie value from sul.js). Server-side template does not hash this value."
+        "defaultValue": true,
+        "help": "When on, sid and udid are read from the inbound request cookies ('sid', 'udid') as a LOWEST-priority fallback — only when not already provided by the SID/UDID fields, User Data Object, or overrides. The 'udid' cookie's '<uuid>@<timestamp>' suffix is stripped to the canonical uuid. The 'sid' cookie value contains '=' but is read whole. Note: Seznam SID is NEVER taken from GA4 event_data, because GA4's 'sid' query param is the GA4 session id, not the Seznam SID. Requires same-site (first-party) SGTM so cookies reach the server; on Safari the 'sid' cookie may be absent (ITP)."
       }
     ]
   },
@@ -317,84 +383,136 @@ ___TEMPLATE_PARAMETERS___
     "groupStyle": "ZIPPY_CLOSED",
     "subParams": [
       {
+        "type": "SELECT",
+        "name": "eventDataInputMode",
+        "displayName": "Event Data input mode",
+        "macrosInSelect": false,
+        "selectItems": [
+          { "value": "object", "displayValue": "Object variable" },
+          { "value": "fields", "displayValue": "Individual fields" }
+        ],
+        "simpleValueType": true,
+        "defaultValue": "object",
+        "help": "Choose how to provide event data. 'Object variable': one GTM variable resolving to an object with event_data keys (currency, value, order_id, contents, etc.). 'Individual fields': map each field separately. Both produce the same payload."
+      },
+      {
         "type": "TEXT",
         "name": "eventDataObject",
-        "displayName": "Event Data Object (optional)",
+        "displayName": "Event Data Object",
         "simpleValueType": true,
-        "help": "A GTM variable resolving to an object with event data fields (currency, value, order_id, etc.). Individual fields below override keys from this object."
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "object", "type": "EQUALS" }
+        ],
+        "help": "A GTM variable resolving to an object with event data fields (currency, value, order_id, value_tax, delivery_price, content_type, contents, etc.)."
       },
       {
         "type": "TEXT",
         "name": "sznaiid",
         "displayName": "sznaiid (click-through ID)",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "currency",
         "displayName": "Currency",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "value",
         "displayName": "Value",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "orderId",
         "displayName": "Order ID",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "contentType",
         "displayName": "Content Type",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "contents",
         "displayName": "Contents (array variable or JSON string)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Assign a GTM variable resolving to an array of SEM-native content objects [{id, quantity, unit_price, content_name, content_category}], or a JSON string in the same shape. When contents is present, content_type is required by SEM; if omitted, this template defaults it to product. No GA4 items mapping is performed — convert upstream."
       },
       {
         "type": "TEXT",
         "name": "deliveryPrice",
         "displayName": "Delivery Price",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "deliveryType",
         "displayName": "Delivery Type",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "paymentType",
         "displayName": "Payment Type",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "otherCosts",
         "displayName": "Other Costs",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "predictedLtv",
         "displayName": "Predicted LTV",
-        "simpleValueType": true
+        "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ]
       },
       {
         "type": "TEXT",
         "name": "valueTax",
         "displayName": "Value Tax (value_tax)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Tax portion of value. Numeric."
       },
       {
@@ -402,6 +520,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "reviewEmail",
         "displayName": "Review Email (review_email, UNHASHED)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Zboží.cz satisfaction survey email. MUST be sent as plain text, NOT hashed. Only send with user consent."
       },
       {
@@ -409,6 +530,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "productIds",
         "displayName": "Product IDs (product_ids, array)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "GTM variable resolving to an array of Zboží.cz product IDs (non-negative integers), or JSON string. Non-integer or negative entries are skipped with a warning."
       },
       {
@@ -416,6 +540,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "goodsIntention",
         "displayName": "Goods Intention (goods_intention)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "User intent weight. Numeric."
       },
       {
@@ -423,6 +550,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "goodsPhase",
         "displayName": "Goods Phase (goods_phase)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "User interest phase. Integer — non-integer values are passed through with a warning."
       },
       {
@@ -430,6 +560,9 @@ ___TEMPLATE_PARAMETERS___
         "name": "searchString",
         "displayName": "Search String (search_string)",
         "simpleValueType": true,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Search query text (e.g. for Search event)."
       },
       {
@@ -438,6 +571,9 @@ ___TEMPLATE_PARAMETERS___
         "checkboxText": "Include status field",
         "simpleValueType": true,
         "defaultValue": false,
+        "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
+        ],
         "help": "Enable this to include a boolean status in event_data. Needed because false is a legitimate value — a plain checkbox could not distinguish it from 'not set'."
       },
       {
@@ -450,6 +586,7 @@ ___TEMPLATE_PARAMETERS___
         ],
         "simpleValueType": true,
         "enablingConditions": [
+          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" },
           { "paramName": "statusEnabled", "paramValue": true, "type": "EQUALS" }
         ],
         "help": "Registration/subscription status. Boolean — both true and false are legitimate values."
@@ -670,6 +807,29 @@ const ALLOWED_EVENTS = [
 const NUMERIC_KEYS = [
   'value', 'value_tax', 'delivery_price', 'other_costs',
   'predicted_ltv', 'goods_intention', 'goods_phase'
+];
+
+// Maps FE-template alias keys → canonical SEM wire keys.
+// Use an ordered ARRAY (not an object) because order matters when multiple
+// aliases resolve to the same canonical (e.g. gender vs g): the entry listed
+// FIRST wins. Object iteration order in the GTM sandbox is "should-be-stable"
+// but an explicit array removes the should.
+// MUST be declared before the main execution flow (buildPayload): the GTM sandbox
+// hoists `const` declarations var-style (initialized to undefined), so a const used
+// by buildUserData() would be undefined if declared after the buildPayload() call.
+const USER_DATA_ALIAS_MAP = [
+  { alias: 'email',          canonical: 'em' },
+  { alias: 'phone',          canonical: 'ph' },
+  { alias: 'fname',          canonical: 'fn' },
+  { alias: 'lname',          canonical: 'ln' },
+  { alias: 'gender',         canonical: 'ge' },
+  { alias: 'g',              canonical: 'ge' },
+  { alias: 'birth',          canonical: 'db' },
+  { alias: 'birthDate',      canonical: 'db' },
+  { alias: 'postalCode',     canonical: 'zp' },
+  { alias: 'zip',            canonical: 'zp' },
+  { alias: 'subscription',   canonical: 'subscription_id' },
+  { alias: 'subscriptionId', canonical: 'subscription_id' }
 ];
 
 // GA4 → SEM event-name map. Used only when eventNameSelect === 'auto' AND
@@ -1174,6 +1334,8 @@ function buildPayload(data, parsed) {
       'docs mark it required | trace=' + traceId);
   }
 
+  var eventData = buildEventData(data, parsed.eventData.value, parsed.contents.value, parsed.productIds.value);
+
   var payload = {
     event_name: resolvedEventName,
     schema_version: 'v2',
@@ -1181,7 +1343,7 @@ function buildPayload(data, parsed) {
     event_time: eventTime,
     event_source: data.eventSource || 'web',
     event_url: eventUrl,
-    event_data: buildEventData(data, parsed.eventData.value, parsed.contents.value, parsed.productIds.value),
+    event_data: eventData,
     api: {
       name: 'gtm-server-template',
       version: API_CLIENT_VERSION,
@@ -1283,25 +1445,8 @@ function isUserDataDefined(v) {
   return v !== undefined && v !== null && v !== '';
 }
 
-// Maps FE-template alias keys → canonical SEM wire keys.
-// Use an ordered ARRAY (not an object) because order matters when multiple
-// aliases resolve to the same canonical (e.g. gender vs g): the entry listed
-// FIRST wins. Object iteration order in the GTM sandbox is "should-be-stable"
-// but an explicit array removes the should.
-const USER_DATA_ALIAS_MAP = [
-  { alias: 'email',          canonical: 'em' },
-  { alias: 'phone',          canonical: 'ph' },
-  { alias: 'fname',          canonical: 'fn' },
-  { alias: 'lname',          canonical: 'ln' },
-  { alias: 'gender',         canonical: 'ge' },
-  { alias: 'g',              canonical: 'ge' },
-  { alias: 'birth',          canonical: 'db' },
-  { alias: 'birthDate',      canonical: 'db' },
-  { alias: 'postalCode',     canonical: 'zp' },
-  { alias: 'zip',            canonical: 'zp' },
-  { alias: 'subscription',   canonical: 'subscription_id' },
-  { alias: 'subscriptionId', canonical: 'subscription_id' }
-];
+// USER_DATA_ALIAS_MAP is declared near the top (before the main execution flow) so it
+// is initialized before buildUserData() runs. See note there.
 
 function isAliasKey(key) {
   for (var i = 0; i < USER_DATA_ALIAS_MAP.length; i++) {
@@ -1374,6 +1519,28 @@ function buildUserData(data, parsedUserDataObject) {
 
   // Layer 3: override table
   applyOverrides(userData, data.userDataOverrides);
+
+  // Layer 4: cookie fallback for sid / udid (LOWEST priority — only fills gaps).
+  // Explicit-false check: defaultValue=true may not hydrate into existing instances on
+  // template upgrade, so treat undefined as ON.
+  // - The 'sid' cookie value contains '=' (id=...|...|c=...); getCookieValues splits on the
+  //   first '=' only, so the full SID string is returned intact.
+  // - The 'udid' cookie carries a '<uuid>@<timestamp>' suffix (set by sul.js); only the uuid
+  //   part is the canonical udid sent S2S (matches sem.js cookie-read behaviour).
+  // - Seznam SID is NEVER read from GA4 event_data: GA4's 'sid' query param is the GA4 session
+  //   id, not the Seznam SID. Cookie 'sid' is the only auto-source here.
+  if (data.autoMapIdsFromCookies !== false) {
+    if (!userData.sid) {
+      var cookieSid = getFirstCookie('sid');
+      if (cookieSid && isValidSid(cookieSid)) userData.sid = cookieSid;
+      else if (cookieSid) logToConsole('Seznam SEM [WARN]: ignoring malformed sid cookie | trace=' + traceId);
+    }
+    if (!userData.udid) {
+      var cookieUdid = normalizeUdid(getFirstCookie('udid'));
+      if (cookieUdid && isValidUdid(cookieUdid)) userData.udid = cookieUdid;
+      else if (cookieUdid) logToConsole('Seznam SEM [WARN]: ignoring malformed udid cookie | trace=' + traceId);
+    }
+  }
 
   return userData;
 }
@@ -1512,6 +1679,46 @@ function addIfPresent(obj, key, value) {
   if (value) {
     obj[key] = value;
   }
+}
+
+// Returns the first value of an inbound request cookie, or '' when absent.
+function getFirstCookie(name) {
+  var values = getCookieValues(name);
+  return (getType(values) === 'array' && values.length > 0) ? values[0] : '';
+}
+
+// The 'udid' cookie set by sul.js is '<uuid>@<timestamp>'; the canonical udid sent S2S is
+// only the uuid part (matches sem.js cookie-read behaviour). Empty input returns ''.
+function normalizeUdid(v) {
+  if (!v) return '';
+  var parts = v.split('@');
+  return parts[0] || v;
+}
+
+// Cookie values are user-controllable, so the cookie fallback validates shape before
+// forwarding. Structural checks only, using sandbox-proven primitives (split / indexOf /
+// length) — NO per-char access (charAt/charCodeAt/index). Charset enforcement is left to
+// the Seznam server, consistent with isValidSemId.
+
+// UUID shape via segment lengths: 8-4-4-4-12.
+function isValidUdid(v) {
+  if (!v) return false;
+  var p = v.split('-');
+  return p.length === 5 &&
+         p[0].length === 8 && p[1].length === 4 && p[2].length === 4 &&
+         p[3].length === 4 && p[4].length === 12;
+}
+
+// Seznam SID shape (matches sem.js `sn`): id=...|t=...|te=...|c=<32 chars>.
+function isValidSid(v) {
+  if (!v) return false;
+  var parts = v.split('|');
+  if (parts.length !== 4) return false;
+  if (parts[0].indexOf('id=') !== 0 || parts[0].length <= 3) return false;
+  if (parts[1].indexOf('t=') !== 0 || parts[1].length <= 2) return false;
+  if (parts[2].indexOf('te=') !== 0 || parts[2].length <= 3) return false;
+  var c = parts[3].split('=');
+  return c.length === 2 && c[0] === 'c' && c[1].length === 32;
 }
 
 // NaN fails all comparisons, so `n === Math.floor(n)` returns false for NaN.
@@ -1716,7 +1923,9 @@ ___SERVER_PERMISSIONS___
           "value": {
             "type": 2,
             "listItem": [
-              { "type": 1, "string": "sznaiid" }
+              { "type": 1, "string": "sznaiid" },
+              { "type": 1, "string": "sid" },
+              { "type": 1, "string": "udid" }
             ]
           }
         }
@@ -2321,6 +2530,127 @@ scenarios:
       useOptimisticScenario: false
     });
     assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('abc123');
+
+- name: sid is auto-mapped from the 'sid' request cookie when no explicit field
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getCookieValues', (name) => name === 'sid'
+      ? ['id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79']
+      : []);
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.sid).isEqualTo('id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79');
+
+- name: udid cookie with uuid@timestamp suffix is normalized to the canonical uuid
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getCookieValues', (name) => name === 'udid'
+      ? ['019ef805-5dbe-7e8b-acd1-8caed14a91fa@1782277561803']
+      : []);
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('019ef805-5dbe-7e8b-acd1-8caed14a91fa');
+
+- name: explicit sid/udid fields win over request cookies
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getCookieValues', (name) => {
+      if (name === 'sid') return ['id=COOKIE'];
+      if (name === 'udid') return ['cookie-uuid@123'];
+      return [];
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      sid: 'id=EXPLICIT',
+      userUdid: 'explicit-uuid',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.sid).isEqualTo('id=EXPLICIT');
+    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('explicit-uuid');
+
+- name: cookie auto-map of sid/udid can be disabled
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getCookieValues', (name) => {
+      if (name === 'sid') return ['id=COOKIE'];
+      if (name === 'udid') return ['cookie-uuid@123'];
+      return [];
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      autoMapIdsFromCookies: false,
+      userEmail: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.sid).isUndefined();
+    assertThat(capturedBody.user_ids.user_data.udid).isUndefined();
+
+- name: User Data Object sid/udid win over request cookies
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getCookieValues', (name) => {
+      if (name === 'sid') return ['id=1|t=1.000|te=1.000|c=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'];
+      if (name === 'udid') return ['019ef805-5dbe-7e8b-acd1-8caed14a91fa@123'];
+      return [];
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userDataObject: { sid: 'id=OBJECT', udid: 'object-uuid' },
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.sid).isEqualTo('id=OBJECT');
+    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('object-uuid');
+
+- name: malformed sid/udid cookies are rejected, not forwarded
+  code: |-
+    let capturedBody;
+    mock('sendHttpRequest', (url, opts, body) => {
+      capturedBody = JSON.parse(body);
+      return Promise.create((r) => r({ statusCode: 200 }));
+    });
+    mock('getCookieValues', (name) => {
+      if (name === 'sid') return ['not-a-valid-sid'];
+      if (name === 'udid') return ['short@123'];
+      // keep user_data non-empty so user_ids exists
+      return [];
+    });
+    runCode({
+      eventNameSelect: 'PageView',
+      semId: 'abcdefghijklmnopqrstuvwx',
+      userEmail: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      useOptimisticScenario: false
+    });
+    assertThat(capturedBody.user_ids.user_data.sid).isUndefined();
+    assertThat(capturedBody.user_ids.user_data.udid).isUndefined();
 
 - name: contents empty array is passed through
   code: |-
