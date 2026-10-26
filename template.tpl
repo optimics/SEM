@@ -2744,7 +2744,7 @@ scenarios:
     assertApi('gtmOnFailure').wasCalled();
     assertApi('sendHttpRequest').wasNotCalled();
 
-- name: 'v3: Unknown event with stored loose validation fails with the v2 hint (d.8)'
+- name: v3 - Unknown event with stored loose validation fails with the v2 hint (d8)
   code: |-
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     runCode({
@@ -2761,7 +2761,7 @@ scenarios:
     assertThat(logged('Unknown event name: Foo')).isTrue();
     assertThat(logged('(v2 loose validation no longer applies)')).isTrue();
 
-- name: 'v3: Invalid JSON in userDataObject is an ERROR, the object is omitted and the hit is sent (d.9)'
+- name: v3 - Invalid JSON in userDataObject is an ERROR, the object is omitted and the hit is sent (d9)
   code: |-
     runCode(tagData({ userDataObject: '{not json', strictEventValidation: true, logType: 'no' }));
     assertThat(sent().event_name).isEqualTo('PageView');
@@ -2769,14 +2769,14 @@ scenarios:
     assertThat(logged('Seznam SEM [ERROR]: userDataObject: invalid JSON, got string; omitting it')).isTrue();
     assertSucceeded();
 
-- name: 'v3: Invalid JSON in eventDataObject is an ERROR, the object is omitted and the hit is sent (d.9)'
+- name: v3 - Invalid JSON in eventDataObject is an ERROR, the object is omitted and the hit is sent (d9)
   code: |-
     runCode(tagData({ eventDataObject: '{not json', strictEventValidation: true, logType: 'no' }));
     assertThat(sent().event_data).isEqualTo({ sem_id: SEM_ID });
     assertThat(logged('Seznam SEM [ERROR]: eventDataObject: invalid JSON, got string; omitting it')).isTrue();
     assertSucceeded();
 
-- name: 'v3: Invalid JSON in the Contents field is omitted with a WARN and the hit is sent (d.9)'
+- name: v3 - Invalid JSON in the Contents field is omitted with a WARN and the hit is sent (d9)
   code: |-
     runCode(tagData({ contents: '{not json', strictEventValidation: true }));
     assertThat(sent().event_data.contents).isUndefined();
@@ -3064,7 +3064,7 @@ scenarios:
     assertApi('gtmOnFailure').wasCalled();
     assertApi('sendHttpRequest').wasNotCalled();
 
-- name: 'v3: Short semId with stored loose validation fails (d.8)'
+- name: v3 - Short semId with stored loose validation fails (d8)
   code: |-
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     runCode({
@@ -3078,7 +3078,7 @@ scenarios:
     assertThat(logged('semId must be 24 characters')).isTrue();
     assertThat(logged('(v2 loose validation no longer applies)')).isTrue();
 
-- name: 'v3: SemId off pattern 24 chars fails without crashing (hotfix v211, d.8)'
+- name: v3 - SemId off pattern 24 chars fails without crashing (hotfix v211, d8)
   code: |-
     // Hotfix regression: the old charCodeAt-based charset check crashed with TypeError in the SGTM
     // sandbox. The charAt/indexOf check rejects an upper-case 24-char string; v3 always fails on it.
@@ -3153,7 +3153,7 @@ scenarios:
     assertThat(capturedCookieWrite.options.httpOnly).isEqualTo(false);
     assertThat(capturedCookieWrite.options.secure).isEqualTo(true);
 
-- name: 'v3: sznaiid cookie is overwritten by a new click whatever the stored mode (v22 cookie-3, d.3)'
+- name: v3 - sznaiid cookie is overwritten by a new click whatever the stored mode (v22 cookie-3, d3)
   code: |-
     let capturedCookieWrite;
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
@@ -3528,7 +3528,7 @@ scenarios:
     }
     assertThat(found).isEqualTo(true);
 
-- name: 'v3: Outgoing request includes X-Client-Id and X-Client-Version 3.0.0 (v221 headers-1, d.12)'
+- name: v3 - Outgoing request includes X-Client-Id and X-Client-Version 3-0-0 (v221 headers-1, d12)
   code: |-
     let capturedOpts;
     let capturedBody;
@@ -4341,7 +4341,7 @@ scenarios:
     runCode(tagData({ consentModeObject: { ad_storage: 'granted', ad_user_data: 'granted' } }));
     assertThat(sent().s2s_headers).isUndefined();
 
-- name: 'v3: sznaiid - cookie uses sameSite lax, httpOnly false and the fixed 30-day lifetime (d.3)'
+- name: v3 - sznaiid - cookie uses sameSite lax, httpOnly false and the fixed 30-day lifetime (d3)
   code: |-
     mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
     mock('getCookieValues', () => []);
@@ -4439,7 +4439,7 @@ scenarios:
     assertFailedWithoutRequest();
     assertThat(logged('semId must be 24 characters')).isTrue();
 
-- name: 'v3: sem_id - wrong charset fails even without Strict Event Validation (d.8)'
+- name: v3 - sem_id - wrong charset fails even without Strict Event Validation (d8)
   code: |-
     runCode(tagData({ semId: 'abcdefghijklmnopqrstuvw-' }));
     assertFailedWithoutRequest();
@@ -4454,7 +4454,7 @@ scenarios:
     }));
     assertThat(sent().event_data.sem_id).isEqualTo(SEM_ID);
 
-- name: 'v3: diagnostics - logType always logs the consent summary, raw x-ga-gcs and identity sources in production (d.7)'
+- name: v3 - diagnostics - logType always logs the consent summary, raw x-ga-gcs and identity sources in production (d7)
   code: |-
     containerVersion = { debugMode: false, previewMode: false };
     mock('getAllEventData', { 'x-ga-gcs': 'G111' });
@@ -4482,7 +4482,7 @@ scenarios:
     assertThat(sent().event_data.order_id).isEqualTo('NO-1');
     assertSucceeded();
 
-- name: 'v3: R4 - GA4 transaction_id and item_id 0 are sent as the string 0, transaction_id is not an event_id (d.2)'
+- name: v3 - R4 - GA4 transaction_id and item_id 0 are sent as the string 0, transaction_id is not an event_id (d2)
   code: |-
     mock('getAllEventData', {
       transaction_id: 0,
@@ -4625,7 +4625,7 @@ scenarios:
     assertThat(sent().event_data).isEqualTo({ sem_id: SEM_ID });
     assertSucceeded();
 
-- name: 'v3: R12 - boolean false in a JSON object field is an ERROR and the hit is sent (d.9)'
+- name: v3 - R12 - boolean false in a JSON object field is an ERROR and the hit is sent (d9)
   code: |-
     runCode(tagData({ strictEventValidation: true, userDataObject: false }));
     assertThat(sent().event_name).isEqualTo('PageView');
@@ -5389,7 +5389,7 @@ scenarios:
     assertThat(legacyLines()[0]).doesNotContain('SECRET');
     assertSucceeded();
 
-- name: v3 legacy F6 - default-valued v2.x settings and the fresh v3 defaults report nothing
+- name: v3 legacy F6 - default-valued v2x settings and the fresh v3 defaults report nothing
   code: |-
     runCode(legacyTagData({}));
     runCode(freshTagDefaults({ eventDataTable: rows({ currency: 'CZK' }) }));
@@ -5432,7 +5432,7 @@ scenarios:
     assertThat(logged('Unknown event name: Foo')).isTrue();
     assertThat(logged('(v2 loose validation no longer applies)')).isFalse();
 
-- name: v3 d.1 - Auto from GA4 maps the 13 one-to-one names without GA4 prefill
+- name: v3 d1 - Auto from GA4 maps the 13 one-to-one names without GA4 prefill
   code: |-
     const NAMES = [
       ['page_view', 'PageView'], ['view_item', 'ViewContent'], ['search', 'Search'],
@@ -5450,7 +5450,7 @@ scenarios:
       assertThat(requests[i].body.event_name, NAMES[i][0]).isEqualTo(NAMES[i][1]);
     }
 
-- name: v3 d.1 - the removed GA4 names fail with Unknown event name, even with the v2.3 auto-map settings
+- name: v3 d1 - the removed GA4 names fail with Unknown event name, even with the v23 auto-map settings
   code: |-
     const REMOVED = ['login', 'add_shipping_info', 'view_item_list', 'select_item', 'view_promotion'];
     for (let i = 0; i < REMOVED.length; i++) {
@@ -5460,7 +5460,7 @@ scenarios:
     }
     assertThat(requests.length).isEqualTo(0);
 
-- name: v3 d.1 O6 - Auto from GA4 without prefill maps the name but fills no payload fields
+- name: v3 d1 O6 - Auto from GA4 without prefill maps the name but fills no payload fields
   code: |-
     mock('getAllEventData', {
       event_name: 'purchase',
@@ -5500,7 +5500,7 @@ scenarios:
     assertFailedWithoutRequest();
     assertThat(logged('Seznam SEM [ERROR]: eventName is required')).isTrue();
 
-- name: v3 d.2 - transaction_id is not used as event_id and the gap is warned
+- name: v3 d2 - transaction_id is not used as event_id and the gap is warned
   code: |-
     mock('getAllEventData', { transaction_id: 'TX-1', currency: 'CZK', value: 10 });
     runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
@@ -5508,7 +5508,7 @@ scenarios:
     assertThat(sent().event_data.order_id).isEqualTo('TX-1');
     assertThat(logged('transaction_id is no longer used as event_id; set Event ID')).isTrue();
 
-- name: v3 d.2 - GA4 event_id or an explicit Event ID silence the transaction_id WARN
+- name: v3 d2 - GA4 event_id or an explicit Event ID silence the transaction_id WARN
   code: |-
     mock('getAllEventData', { event_id: 'EV-1', transaction_id: 'TX-1', currency: 'CZK', value: 10 });
     runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
@@ -5518,7 +5518,7 @@ scenarios:
     assertThat(requests[1].body.event_id).isEqualTo('Purchase__TX-2');
     assertThat(logged('transaction_id is no longer used as event_id')).isFalse();
 
-- name: v3 d.4 - IP and User-Agent come from the event data first, Client Hints from the headers
+- name: v3 d4 - IP and User-Agent come from the event data first, Client Hints from the headers
   code: |-
     mock('getRequestHeader', (name) => ({
       'x-forwarded-for': '1.2.3.4, 10.0.0.1',
@@ -5533,7 +5533,7 @@ scenarios:
       sec_ch_ua: '"Chromium";v="141"'
     });
 
-- name: v3 d.4 - blank event data values fall back to the request headers, consent still gates them
+- name: v3 d4 - blank event data values fall back to the request headers, consent still gates them
   code: |-
     mockClientHeaders();
     mock('getAllEventData', { ip_override: '  ', user_agent: '' });
@@ -5542,7 +5542,7 @@ scenarios:
     assertThat(requests[0].body.s2s_headers).isEqualTo({ client_ip_address: '1.2.3.4', user_agent: 'test-ua' });
     assertThat(requests[1].body.s2s_headers).isUndefined();
 
-- name: v3 d.5 - an unset Use Optimistic Scenario waits for Seznam's answer
+- name: v3 d5 - an unset Use Optimistic Scenario waits for Seznam's answer
   code: |-
     httpResult = { statusCode: 500, headers: {}, body: '' };
     const fields = tagData({});
@@ -5551,14 +5551,14 @@ scenarios:
     assertApi('gtmOnSuccess').wasNotCalled();
     assertFailedAfterResponse();
 
-- name: v3 d.5 - a stored true stays optimistic
+- name: v3 d5 - a stored true stays optimistic
   code: |-
     httpResult = { statusCode: 500, headers: {}, body: '' };
     runCode(legacyTagData({ useOptimisticScenario: true }));
     assertApi('gtmOnSuccess').wasCalled();
     callLater(() => { assertApi('gtmOnFailure').wasNotCalled(); });
 
-- name: v3 d.7 - fresh defaults in production drop WARN lines, Preview keeps them
+- name: v3 d7 - fresh defaults in production drop WARN lines, Preview keeps them
   code: |-
     containerVersion = { debugMode: false, previewMode: false };
     runCode(freshTagDefaults({ eventDataTable: rows({ currency: 'EUR' }) }));
@@ -5569,7 +5569,7 @@ scenarios:
     assertThat(productionLogs).isEqualTo(0);
     assertThat(logged('currency=EUR')).isTrue();
 
-- name: v3 d.7 - an unavailable container version counts as production for logType debug
+- name: v3 d7 - an unavailable container version counts as production for logType debug
   code: |-
     containerVersion = undefined;
     runCode(tagData({ logType: 'debug', eventDataTable: rows({ currency: 'EUR' }) }));
@@ -5798,7 +5798,7 @@ scenarios:
     assertThat(sent().event_data).isEqualTo({ currency: 'CZK', sem_id: SEM_ID });
     assertThat(logged('event_data.unknown_key is not a Seznam field')).isTrue();
 
-- name: v3 O3 d.9 - a malformed Event Data Object does not stop a valid GA4 Purchase
+- name: v3 O3 d9 - a malformed Event Data Object does not stop a valid GA4 Purchase
   code: |-
     mock('getAllEventData', { transaction_id: 'TX-1', currency: 'CZK', value: 100 });
     runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true, eventDataObject: '{"order_id":' }));
@@ -5806,14 +5806,14 @@ scenarios:
     assertThat(logged('[ERROR]: eventDataObject: invalid JSON, got string; omitting it')).isTrue();
     assertSucceeded();
 
-- name: v3 O3 d.9 - an object-only Purchase with a malformed object fails final validation
+- name: v3 O3 d9 - an object-only Purchase with a malformed object fails final validation
   code: |-
     runCode(tagData({ eventNameSelect: 'Purchase', eventDataObject: '{"order_id":"O-1","currency":"CZK"' }));
     assertFailedWithoutRequest();
     assertThat(logged('[ERROR]: eventDataObject: invalid JSON, got string; omitting it')).isTrue();
     assertThat(logged('Purchase requires: order_id, currency, value')).isTrue();
 
-- name: v3 O7 d.14 - a blank or placeholder Event URL falls back to page_location and the Referer
+- name: v3 O7 d14 - a blank or placeholder Event URL falls back to page_location and the Referer
   code: |-
     mock('getRequestHeader', (name) => name === 'referer' ? 'https://shop.example/from-referer' : undefined);
     runCode(tagData({ eventUrl: '   ' }));
@@ -5824,7 +5824,7 @@ scenarios:
     assertThat(requests[1].body.event_url).isEqualTo('https://shop.example/from-ga4');
     assertThat(requests[2].body.event_url).isEqualTo('https://shop.example/from-referer');
 
-- name: v3 O7 d.14 - without any URL source event_url is not serialized
+- name: v3 O7 d14 - without any URL source event_url is not serialized
   code: |-
     runCode(tagData({ eventUrl: undefined }));
     assertThat(requests[0].raw.indexOf('event_url')).isEqualTo(-1);
@@ -5948,7 +5948,7 @@ scenarios:
     assertThat(logged('semId must be 24 characters')).isTrue();
     assertThat(logged('(v2 loose validation no longer applies)')).isTrue();
 
-- name: v3 R4 - an Auto event name without a mapping gets no hint, as it failed in 2-3-1 too
+- name: v3 R4 - an Auto event name without a mapping gets no hint, as it failed in v231 too
   code: |-
     mock('getAllEventData', { event_name: 'login' });
     runCode(legacyTagData({ eventNameSelect: 'auto' }));
@@ -5956,7 +5956,7 @@ scenarios:
     assertThat(logged('Unknown event name: ga4:login')).isTrue();
     assertThat(logged('(v2 loose validation no longer applies)')).isFalse();
 
-- name: v3 R4 - a missing SEM ID gets no hint, as it failed in 2-3-1 too
+- name: v3 R4 - a missing SEM ID gets no hint, as it failed in v231 too
   code: |-
     runCode(legacyTagData({ semId: '' }));
     assertFailedWithoutRequest();
