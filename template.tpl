@@ -1595,7 +1595,8 @@ function buildUserData(data, parsedUserDataObject) {
   addLayerValue(merged, 'user_data.', 'db', data.userDob);
   addLayerValue(merged, 'user_data.', 'ct', data.userCity);
   // `userState` retained as deprecated runtime fallback (UI renamed to `userRegion`, wire key `region`).
-  addLayerValue(merged, 'user_data.', 'region', data.userRegion || data.userState);
+  // It applies only when userRegion is not supplied; a supplied invalid userRegion stays authoritative.
+  addLayerValue(merged, 'user_data.', 'region', isUnset(data.userRegion) ? data.userState : data.userRegion);
   addLayerValue(merged, 'user_data.', 'zp', data.userZip);
   addLayerValue(merged, 'user_data.', 'sr', data.userStreet);
   addLayerValue(merged, 'user_data.', 'country', data.userCountry);
