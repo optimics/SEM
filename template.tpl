@@ -806,14 +806,15 @@ const ALLOWED_EVENTS = [
 
 // Wire type of every event_data key in rtgconv.json; the normalization pass converts each value to it.
 // 'id' = non-empty string (finite numbers are converted, the placeholders 'undefined'/'null' are invalid),
-// 'text' = free text, 'number' = finite number, 'integer' = whole number, 'boolean' = true/false.
+// 'text' = free text, 'number' = finite number, 'integer' = whole number, 'boolean' = true/false,
+// 'content_type' = one of CONTENT_TYPES.
 // product_ids and contents have their own normalizers. sem_id is not listed: it always comes
 // from the S2S SEM ID field.
 const EVENT_DATA_TYPES = {
   sznaiid: 'id',
   order_id: 'id',
   currency: 'id',
-  content_type: 'id',
+  content_type: 'content_type',
   delivery_type: 'id',
   payment_type: 'id',
   review_email: 'id',
@@ -829,6 +830,9 @@ const EVENT_DATA_TYPES = {
   product_ids: 'product_ids',
   contents: 'contents'
 };
+
+// content_type values in rtgconv.json.
+const CONTENT_TYPES = ['page', 'product', 'product_group', 'search'];
 
 // Free text: the words 'undefined' and 'null' are kept literally here; in every other key
 // they are placeholders from a broken variable mapping and count as not supplied (R8).
@@ -1765,6 +1769,10 @@ function normalizeValue(type, value, path) {
   } else if (type === 'boolean') {
     out = toBoolean(value);
     expected = 'boolean (true/false, 1/0)';
+  } else if (type === 'content_type') {
+    out = toText(value, true);
+    if (out !== undefined && !contains(CONTENT_TYPES, out)) out = undefined;
+    expected = 'one of ' + CONTENT_TYPES.join(', ');
   }
   if (out === undefined) {
     warn(path + ': expected ' + expected + ', got ' + describeType(value) + '; omitting');
