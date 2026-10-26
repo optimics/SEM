@@ -4684,8 +4684,10 @@ scenarios:
 - name: upgrade fixture - tag 20
   code: |-
     // Playground tag 20 "SEM - purchase" (review/gtm-verification/baseline-v2.3.md) as v2.3 stored it:
-    // Individual fields, Status true, consent from the Data Client consent_state, BigQuery logging on.
-    // `expected` is the body P0 v2.3.1 (1195cb4) sent for exactly these inputs and mocks.
+    // Individual fields, Include status off with a hidden stored Status true (v3-gates.md G-2: its
+    // BigQuery rows carry no status), optimistic on, consent from the Data Client consent_state,
+    // BigQuery logging on. `expected` is the body P0 v2.3.1 (1195cb4) sent for exactly these inputs
+    // and mocks (review/v3-review-evidence/p0-fixture-replay-tag20-G2.tpl).
     let bigQueryRows = [];
     mockObject('BigQuery', {
       insert: (connection, rows) => {
@@ -4751,7 +4753,6 @@ scenarios:
         { id: 'SKU-2', quantity: 1, unit_price: 1000 }
       ],
       valueTax: '347.11',
-      statusEnabled: true,
       status: 'true',
       testMode: false,
       useOptimisticScenario: true,
@@ -4783,7 +4784,6 @@ scenarios:
           { quantity: 2, id: 'SKU-1', unit_price: 500, content_name: 'Mixér' },
           { quantity: 1, id: 'SKU-2', unit_price: 1000 }
         ],
-        status: true,
         sem_id: 'hjqrj33mlq8phxinul9fmdo6'
       },
       api: { name: 'gtm-server-template', version: '1', template_version: '2.3.1' },
@@ -4829,7 +4829,7 @@ scenarios:
       'userFirstName→user_data.fn, userLastName→user_data.ln, userCity→user_data.ct, userZip→user_data.zp, ' +
       'userStreet→user_data.sr, currency→event_data.currency, value→event_data.value, ' +
       'valueTax→event_data.value_tax, orderId→event_data.order_id, contentType→event_data.content_type, ' +
-      'contents→event_data.contents, statusEnabled→event_data.status;');
+      'contents→event_data.contents;');
     callLater(() => {
       assertThat(bigQueryRows.length).isEqualTo(1);
       assertThat(bigQueryRows[0].request_body).isEqualTo(requests[0].raw);
