@@ -959,6 +959,8 @@ const SZNAIID_MAX_AGE = 2592000;
  ******************************************************************************/
 
 const traceId = getRequestHeader('trace-id');
+// The trace-id header is absent on Cloud Run; the log lines then end without a trace.
+const traceSuffix = traceId ? ' | trace=' + traceId : '';
 // Legacy v2.x items in active use. Created first, because resolveLogLevel() may record testMode;
 // reported once per execution by flushLegacyUse(), also on failure (failTag).
 const legacyUsed = [];
@@ -1011,7 +1013,7 @@ function shouldLog() {
 }
 
 function warn(message) {
-  if (shouldLog()) logToConsole('Seznam SEM [WARN]: ' + message + ' | trace=' + traceId);
+  if (shouldLog()) logToConsole('Seznam SEM [WARN]: ' + message + traceSuffix);
 }
 
 // ERROR lines are always logged; the callers add the context.
@@ -1039,7 +1041,7 @@ function flushLegacyUse() {
   legacyUsed.splice(0, legacyUsed.length);
   if (names.length === 0) return;
   logToConsole('Seznam SEM [WARN]: v2.x settings in use: ' + names.join(', ') +
-    '; move them to the v3 tables/settings (README "Přechod na v3") | trace=' + traceId);
+    '; move them to the v3 tables/settings (README "Přechod na verzi 3")' + traceSuffix);
 }
 
 // Request diagnostics: the consent summary, the raw GA4 x-ga-gcs value (logged only, never decoded
@@ -1139,7 +1141,7 @@ function validate(payload) {
   // A stored v2 "Strict Event Validation" off gets a hint where 2.3.1 would have sent the hit; it
   // does not prove that the tag is old.
   var hint = (looseInV2 && data.strictEventValidation === false) ? ' (v2 loose validation no longer applies)' : '';
-  return problem + ' | event=' + payload.event_name + ' | trace=' + traceId + hint;
+  return problem + ' | event=' + payload.event_name + traceSuffix + hint;
 }
 
 // Configuration and validation failures: ERROR log and the legacy WARN, no request, no cookie write.
@@ -1410,7 +1412,7 @@ function parseObjectField(fieldName, rawValue) {
     if (getType(value) === 'object') return value;
     problem = value === undefined ? 'invalid JSON, got string' : 'expected a JSON object, got string';
   }
-  error(fieldName + ': ' + problem + '; omitting it | trace=' + traceId);
+  error(fieldName + ': ' + problem + '; omitting it' + traceSuffix);
   return undefined;
 }
 
@@ -2067,7 +2069,7 @@ function send(payload) {
     // sendHttpRequest rejects with { reason: 'failed' | 'timed_out' }.
     var why = (getType(reason) === 'object' && (reason.reason === 'failed' || reason.reason === 'timed_out')) ? reason.reason : 'unknown';
     error('request to Seznam failed: ' + why +
-      ' | event=' + eventName + ' | trace=' + traceId);
+      ' | event=' + eventName + traceSuffix);
     logToBigQuery({ url: API_URL, body: payload });
 
     if (!optimistic) data.gtmOnFailure();
@@ -2087,7 +2089,7 @@ function logHttpError(result) {
     ' | event=' + eventName +
     ' | semId=' + data.semId +
     ' | request_id=' + requestId +
-    ' | trace=' + traceId + hint);
+    traceSuffix + hint);
 }
 
 function logToBigQuery(requestInfo, responseInfo) {
@@ -2121,7 +2123,7 @@ function logToBigQuery(requestInfo, responseInfo) {
     var first = getType(errors) === 'array' && getType(errors[0]) === 'object' ? errors[0] : {};
     var reason = getType(first.errors) === 'array' && getType(first.errors[0]) === 'object' ? first.errors[0].reason : first.reason;
     error('BigQuery insert failed: ' + (contains(BIGQUERY_ERROR_REASONS, reason) ? reason : 'unknown') +
-      ' | rows=' + (getType(errors) === 'array' ? errors.length : 0) + ' | trace=' + traceId);
+      ' | rows=' + (getType(errors) === 'array' ? errors.length : 0) + traceSuffix);
   });
 }
 
