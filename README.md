@@ -31,18 +31,21 @@ Doporučený postup:
 
 **1. CMP → `sul.js`.** Pokud CMP nepoužívá IAB TCF, předejte její stav také knihovně Seznamu: po načtení `sul.js` zavolejte `SEM('updateConsent', {consent_mode: stavZCMP})` při inicializaci stránky (výchozí stav CMP) a po každé změně volby uživatele. Samotný Google Consent Mode update tento krok nenahrazuje. Bez tohoto propojení `sul.js` cookies `sid` ani `udid` nevytvoří (ověřeno v testovacím kontejneru 26. 10. 2026: po zavolání vznikly do 6 s).
 
-Příklad. Funkce `nactiStavCmp()` a `priZmeneCmp()` nahraďte API vaší CMP a kategorie (`marketing`, `analytics`, `functional`) kategoriemi, které vaše CMP používá. Hodnoty musí odpovídat skutečné volbě uživatele, ne napevno `granted`.
+Příklad. Funkce `nactiStavCmp()` a `priZmeneCmp()` nahraďte API vaší CMP a kategorie (`marketing`, `analytics`, `functional`) kategoriemi, které vaše CMP používá. Hodnoty musí odpovídat skutečné volbě uživatele, ne napevno `granted`. Funkce `semState()` vrátí `granted` jen pro `true`, `1`, `'1'`, `'true'` a `'granted'`; cokoli jiného (`false`, `'denied'`, `'false'`, `'0'`, neznámá hodnota) je `denied`. Používá-li vaše CMP jiné hodnoty souhlasu (například `'accepted'`), doplňte je do `semState()` výslovně.
 
 ```html
 <script src="https://l.seznam.cz/sul.js?id=VASE_SEM_ID"></script>
 <script>
+  function semState(v) {
+    return (v === true || v === 1 || v === '1' || v === 'true' || v === 'granted') ? 'granted' : 'denied';
+  }
   function semConsentMode(stav) {
     return {
-      ad_storage: stav.marketing ? 'granted' : 'denied',
-      ad_user_data: stav.marketing ? 'granted' : 'denied',
-      ad_personalization: stav.marketing ? 'granted' : 'denied',
-      analytics_storage: stav.analytics ? 'granted' : 'denied',
-      functionality_storage: stav.functional ? 'granted' : 'denied'
+      ad_storage: semState(stav.marketing),
+      ad_user_data: semState(stav.marketing),
+      ad_personalization: semState(stav.marketing),
+      analytics_storage: semState(stav.analytics),
+      functionality_storage: semState(stav.functional)
     };
   }
   if (typeof window.SEM === 'function') {
@@ -64,7 +67,7 @@ Příklad. Funkce `nactiStavCmp()` a `priZmeneCmp()` nahraďte API vaší CMP a 
 
 Pole **S2S SEM ID (Sklik)** je identifikátor pro server-to-server měření. Najdete ho ve Skliku v pokročilém nastavení účtu. Není to stejné ID jako frontendové `sul.js?id=...`.
 
-Šablona kontroluje, že S2S SEM ID má přesně 24 znaků z `0-9` a `a-z` (`^[0-9a-z]{24}$`). Se zapnutou volbou **Strict Event Validation** jiná hodnota tag zastaví a nic se neodešle. Bez ní šablona zaloguje warning a hit odešle; jak s ním Seznam naloží, není zaručené. Schéma vyžaduje `^[0-9a-z]{24}$`. 490 hitů z testovacího kontejneru s SEM ID ve správném formátu dostalo odpověď `200` i bez consentu a bez `sid`/`udid`; o chybném SEM ID neříkají nic. Samotná odpověď `200` nedokládá, jak Seznam vyhodnotil consent ani atribuci.
+Šablona kontroluje, že S2S SEM ID má přesně 24 znaků z `0-9` a `a-z` (`^[0-9a-z]{24}$`). Se zapnutou volbou **Strict Event Validation** jiná hodnota tag zastaví a nic se neodešle. Bez ní šablona zaloguje warning a hit odešle; jak s ním Seznam naloží, není zaručené. Schéma vyžaduje `^[0-9a-z]{24}$`. V testovacím kontejneru dostaly odpověď `200` také hity bez consentu nebo bez `sid`/`udid`. Všechny zalogované hity ale měly SEM ID ve správném formátu, takže o chybném SEM ID neříkají nic. Samotná odpověď `200` nedokládá, jak Seznam vyhodnotil consent ani atribuci.
 
 Frontendové i S2S SEM ID mají 24 znaků, takže jejich záměnu lokální kontrola nerozpozná. Podle dokumentace Seznamu může odpověď 401/403 znamenat chybné SEM ID nebo nepřístupný endpoint; šablona k takové odpovědi zaloguje nápovědu.
 
