@@ -1854,11 +1854,12 @@ function normalizeProductIds(list, path) {
  * Shared utilities
  ******************************************************************************/
 
-// Parse a field that may be an object, a JSON string, or empty. Returns {value, error}.
+// Parse a field that may be an object, a JSON string, or missing (isMissing). Returns {value, error}.
+// Other values, including false and 0, are input errors.
 // Callers decide severity (WARN vs. fail) based on strictEventValidation.
 // Note: sandboxed JS does not support try/catch, but JSON.parse returns undefined on invalid input.
 function parseJsonObjectField(fieldName, rawValue) {
-  if (!rawValue) return { value: null, error: null };
+  if (isMissing(rawValue)) return { value: null, error: null };
   if (getType(rawValue) === 'object') return { value: rawValue, error: null };
   if (getType(rawValue) === 'string') {
     var parsed = JSON.parse(rawValue);
@@ -1873,7 +1874,7 @@ function parseJsonObjectField(fieldName, rawValue) {
 
 // Parse a field that may be an array, a JSON string of an array, or empty. Returns {value, error}.
 function parseJsonArray(fieldName, rawValue) {
-  if (!rawValue) return { value: null, error: null };
+  if (isMissing(rawValue)) return { value: null, error: null };
   if (getType(rawValue) === 'array') return { value: rawValue, error: null };
   if (getType(rawValue) === 'string') {
     var parsed = JSON.parse(rawValue);
