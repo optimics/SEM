@@ -931,6 +931,15 @@ const LEGACY_EVENT_FIELDS = [
 // Order of the item groups in the aggregated legacy WARN (flushLegacyUse).
 const LEGACY_GROUPS = ['user', 'event', 'override', 'alias', 'ga4', 'setting'];
 
+// Reason codes of the BigQuery error table; any other reason is logged as 'unknown'.
+const BIGQUERY_ERROR_REASONS = [
+  'accessDenied', 'attributeError', 'backendError', 'badRequest', 'billingNotEnabled',
+  'billingTierLimitExceeded', 'blocked', 'duplicate', 'internalError', 'invalid', 'invalidQuery',
+  'invalidUser', 'jobBackendError', 'jobInternalError', 'jobRateLimitExceeded', 'notFound',
+  'notImplemented', 'proxyAuthenticationRequired', 'quotaExceeded', 'rateLimitExceeded',
+  'resourceInUse', 'resourcesExceeded', 'responseTooLarge', 'stopped', 'tableUnavailable', 'timeout'
+];
+
 const API_URL = 'https://sem.seznam.cz/rtgconv';
 
 // Seznam telemetry: `api.version` tracks the integration client version (bump on contract/behavior changes).
@@ -2068,8 +2077,8 @@ function send(payload) {
     }
   }).catch(function(reason) {
     // sendHttpRequest rejects with { reason: 'failed' | 'timed_out' }.
-    var why = (reason && reason.reason) ? reason.reason : JSON.stringify(reason);
-    error('request to Seznam failed: ' + ('' + why).substring(0, 200) +
+    var why = (getType(reason) === 'object' && (reason.reason === 'failed' || reason.reason === 'timed_out')) ? reason.reason : 'unknown';
+    error('request to Seznam failed: ' + why +
       ' | event=' + eventName + ' | trace=' + traceId);
     logToBigQuery({ url: API_URL, body: payload });
 
@@ -2080,7 +2089,6 @@ function send(payload) {
 }
 
 function logHttpError(result) {
-  var bodySnippet = result.body ? JSON.stringify(result.body).substring(0, 200) : 'n/a';
   var requestId = result.headers ? result.headers['x-request-id'] : undefined;
   // Seznam answers 401/403 for an invalid SEM ID or an endpoint the account cannot use (s2s.html).
   var hint = (result.statusCode === 401 || result.statusCode === 403)
@@ -2091,8 +2099,7 @@ function logHttpError(result) {
     ' | event=' + eventName +
     ' | semId=' + data.semId +
     ' | request_id=' + requestId +
-    ' | trace=' + traceId +
-    ' | body=' + bodySnippet + hint);
+    ' | trace=' + traceId + hint);
 }
 
 function logToBigQuery(requestInfo, responseInfo) {
@@ -2123,7 +2130,10 @@ function logToBigQuery(requestInfo, responseInfo) {
     [bqRow],
     { ignoreUnknownValues: true }
   ).catch(function(errors) {
-    error('BigQuery insert failed: ' + JSON.stringify(errors));
+    var first = getType(errors) === 'array' && getType(errors[0]) === 'object' ? errors[0] : {};
+    var reason = getType(first.errors) === 'array' && getType(first.errors[0]) === 'object' ? first.errors[0].reason : first.reason;
+    error('BigQuery insert failed: ' + (contains(BIGQUERY_ERROR_REASONS, reason) ? reason : 'unknown') +
+      ' | rows=' + (getType(errors) === 'array' ? errors.length : 0) + ' | trace=' + traceId);
   });
 }
 
