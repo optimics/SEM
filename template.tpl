@@ -1701,9 +1701,10 @@ function buildEventData(data, parsed, sznaiidValue) {
   addLayerValue(merged, 'event_data.', 'product_ids', parsed.productIds.value);
   addLayerValue(merged, 'event_data.', 'contents', parsed.contents.value);
 
-  // status: boolean; `statusEnabled` flag distinguishes "not set" from false.
+  // status: `statusEnabled` distinguishes "not set" from false. The value is converted by the
+  // same boolean normalizer as the other layers; enabled without a value sends false (historic).
   if (data.statusEnabled) {
-    merged.status = (data.status === 'true' || data.status === true);
+    merged.status = isUnset(data.status) ? false : data.status;
   }
 
   // Layer 3: override table
@@ -1733,10 +1734,10 @@ function buildEventData(data, parsed, sznaiidValue) {
     warn('contents present without content_type; defaulting content_type=product');
   }
 
-  // FE-parity convenience: CompleteRegistration defaults to status=true when
-  // nothing in any layer has set it. Fires AFTER all layers (object → individual → overrides),
-  // so status false from any layer, including an override row 'false' or false, is kept.
-  if (resolvedEventName === 'CompleteRegistration' && ed.status === undefined) {
+  // FE-parity convenience: CompleteRegistration defaults to status=true only when NO layer
+  // supplied a status (object → individual → overrides). False from any layer is kept, and an
+  // invalid status (e.g. 'no') is omitted with a WARN rather than turned into true.
+  if (resolvedEventName === 'CompleteRegistration' && merged.status === undefined) {
     ed.status = true;
   }
 
