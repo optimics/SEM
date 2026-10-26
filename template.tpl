@@ -1192,20 +1192,20 @@ function isTcfString(s) {
  * GA4 Auto-Map (opt-in)
  ******************************************************************************/
 
-// FE-parity helper: returns the first present value from candidates array, optionally
-// converted to a target type. Missing values and values that are not canonical finite
-// numbers (for 'number') are SKIPPED so fallback candidates can be tried.
+// FE-parity helper: returns the first usable candidate so fallback candidates can be tried.
+// 'id' / 'text': a non-blank string or a finite number, returned RAW (the normalization pass
+// converts it); objects, booleans, arrays, NaN/Infinity are skipped, and for 'id' so are the
+// placeholders 'undefined'/'null'. 'number': a canonical finite number.
 function getFirstValue(candidates, targetType) {
   for (var i = 0; i < candidates.length; i++) {
     var v = candidates[i];
     if (isMissing(v)) continue;
-    if (targetType === 'string') return '' + v;
     if (targetType === 'number') {
       var num = toNumber(v);
       if (num !== undefined) return num;
       continue;
     }
-    return v;
+    if (toText(v, targetType === 'id') !== undefined) return v;
   }
   return undefined;
 }
@@ -1283,8 +1283,8 @@ function extractFromEventData(data, ev) {
   // event_url / event_id are always extracted when auto-map is on — they are
   // top-level payload fields, not gated by the per-section sub-toggles.
   if (ev.page_location) out.eventUrl = ev.page_location;
-  if (ev.event_id) out.eventId = ev.event_id;
-  else if (ev.transaction_id) out.eventId = ev.transaction_id;
+  var ga4EventId = getFirstValue([ev.event_id, ev.transaction_id], 'id');
+  if (ga4EventId !== undefined) out.eventId = ga4EventId;
 
   if (data.autoMapEventName && ev.event_name) {
     if (GA4_EVENT_NAME_MAP.hasOwnProperty(ev.event_name)) {
@@ -1306,8 +1306,8 @@ function extractFromEventData(data, ev) {
     }
 
     // Multi-source order_id: transaction_id (GA4 standard) || id || orderNo (Shoptet).
-    var effectiveOrderId = getFirstValue([ev.transaction_id, ev.id, ev.orderNo], 'string');
-    if (effectiveOrderId) out.eventData.order_id = effectiveOrderId;
+    var effectiveOrderId = getFirstValue([ev.transaction_id, ev.id, ev.orderNo], 'id');
+    if (effectiveOrderId !== undefined) out.eventData.order_id = effectiveOrderId;
 
     // items[] → contents, in the GA4 layer: object/field/override contents (even []) replace them.
     if (getType(ev.items) === 'array' && ev.items.length > 0) {
@@ -1317,12 +1317,12 @@ function extractFromEventData(data, ev) {
         var it = ev.items[i];
         if (!it) { skipped++; continue; }
         // Multi-source item id: item_id (GA4 EE) || id (Shoptet/legacy).
-        var itemId = getFirstValue([it.item_id, it.id], 'string');
-        if (!itemId) { skipped++; continue; }
+        var itemId = getFirstValue([it.item_id, it.id], 'id');
+        if (itemId === undefined) { skipped++; continue; }
         var c = { id: itemId };
 
-        var itemName = getFirstValue([it.item_name, it.name], 'string');
-        if (itemName) c.content_name = itemName;
+        var itemName = getFirstValue([it.item_name, it.name], 'text');
+        if (itemName !== undefined) c.content_name = itemName;
 
         // Multi-source unit_price: price || priceWithVat || fullPrice.
         var price = getFirstValue([it.price, it.priceWithVat, it.fullPrice], 'number');
