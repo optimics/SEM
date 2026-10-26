@@ -4393,10 +4393,10 @@ setup: |-
     return fields;
   }
 
-  // Parsed body of the last request; asserts that a request was made.
+  // Parsed body of the request; asserts that exactly one request was made.
   function sent() {
-    assertApi('sendHttpRequest').wasCalled();
-    return requests[requests.length - 1].body;
+    assertThat(requests.length, 'number of requests').isEqualTo(1);
+    return requests[0].body;
   }
 
   function logged(fragment) {
@@ -4416,6 +4416,7 @@ setup: |-
 
   function assertSucceeded() {
     callLater(() => {
+      assertThat(requests.length, 'number of requests').isEqualTo(1);
       assertApi('gtmOnSuccess').wasCalled();
       assertApi('gtmOnFailure').wasNotCalled();
     });
@@ -4423,6 +4424,7 @@ setup: |-
 
   function assertFailedAfterResponse() {
     callLater(() => {
+      assertThat(requests.length, 'number of requests').isEqualTo(1);
       assertApi('gtmOnFailure').wasCalled();
       assertApi('gtmOnSuccess').wasNotCalled();
     });
