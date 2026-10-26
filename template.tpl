@@ -5196,6 +5196,7 @@ scenarios:
       assertThat(line).contains(FIELDS[i][0] + '→user_data.' + FIELDS[i][1]);
     }
     assertThat(legacyLines().length).isEqualTo(1);
+    assertSucceeded();
 
 - name: v3 legacy F1 - each of the 17 legacy event fields maps to its event_data key
   code: |-
@@ -5228,6 +5229,7 @@ scenarios:
       assertThat(eventData[FIELDS[i][1]], FIELDS[i][0]).isEqualTo(FIELDS[i][3]);
       assertThat(line).contains(FIELDS[i][0] + '→event_data.' + FIELDS[i][1]);
     }
+    assertSucceeded();
 
 - name: v3 legacy F2 - event data precedence is table, override, field, object, GA4
   code: |-
@@ -5271,6 +5273,7 @@ scenarios:
       sem_id: SEM_ID
     });
     assertThat(logged('event_data.currency is the placeholder string')).isTrue();
+    assertSucceeded();
 
 - name: v3 legacy F2 - user data precedence is table, override, field, object, GA4
   code: |-
@@ -5291,6 +5294,7 @@ scenarios:
       fn: 'OBJECT_FN',
       ct: 'OBJECT_CT'
     });
+    assertSucceeded();
 
 - name: v3 legacy F3 - Include status decides whether the legacy Status field applies
   code: |-
@@ -5331,6 +5335,7 @@ scenarios:
     runCode(tagData({ userDataObject: { email: 'HASH_EM', phone: 'HASH_PH', em: 'HASH_CANONICAL', zip: 'HASH_ZP' } }));
     assertThat(sent().user_ids.user_data).isEqualTo({ em: 'HASH_CANONICAL', ph: 'HASH_PH', zp: 'HASH_ZP' });
     assertThat(legacyLines()[0]).contains('alias email→em, alias phone→ph, alias zip→zp');
+    assertSucceeded();
 
 - name: v3 legacy F5 - GA4 platform keys keep the P0 payload and are reported once each
   code: |-
@@ -5361,6 +5366,7 @@ scenarios:
     assertThat(line).contains('ga4.id, ga4.items.id, ga4.items.name, ga4.items.priceWithVat, ga4.items.category, ' +
       'ga4.items.fullPrice, ga4.items.currentCategory, ga4.items.defaultCategory, ga4.revenue');
     assertThat(line.split('ga4.items.priceWithVat').length).isEqualTo(2);
+    assertSucceeded();
 
 - name: v3 legacy F5 - GA4 orderNo and totalWithoutVat are reported
   code: |-
@@ -5368,6 +5374,7 @@ scenarios:
     runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
     assertThat(sent().event_data).isEqualTo({ currency: 'CZK', order_id: 'NO-1', value: 175, sem_id: SEM_ID });
     assertThat(legacyLines()[0]).contains('ga4.orderNo, ga4.totalWithoutVat');
+    assertSucceeded();
 
 - name: v3 legacy F6 - one aggregated WARN per execution, without values, in the fixed order
   code: |-
