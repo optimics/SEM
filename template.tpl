@@ -4134,11 +4134,27 @@ scenarios:
     assertFailedWithoutRequest();
     assertThat(logged('consentModeObject.ad_user_data: expected granted/denied')).isTrue();
 
-- name: P0 consent M2 - null on a recognized key fails
+- name: P0 consent M2 - a number other than 0 and 1 on a recognized key fails
   code: |-
-    runCode(tagData({ consentModeObject: { ad_storage: null } }));
+    runCode(tagData({ consentModeObject: { ad_storage: 2 } }));
     assertFailedWithoutRequest();
-    assertThat(logs).contains('Seznam SEM [ERROR]: consentModeObject.ad_storage: expected granted/denied (or true/false, 1/0), got null');
+    assertThat(logs).contains('Seznam SEM [ERROR]: consentModeObject.ad_storage: expected granted/denied (or true/false, 1/0), got number');
+
+- name: P0 consent R1 - null on a recognized key counts as missing and is not filled
+  code: |-
+    mockClientHeaders();
+    runCode(tagData({ sendS2sHeaders: true, consentModeObject: { ad_storage: null, ad_user_data: 'granted' } }));
+    assertThat(sent().consent_mode).isEqualTo({ ad_user_data: 'granted' });
+    assertThat(sent().s2s_headers).isUndefined();
+    assertThat(logged('consentModeObject.ad_storage is null')).isTrue();
+    assertSucceeded();
+
+- name: P0 consent R1 - all recognized keys null in parsed JSON omit consent_mode with a WARN
+  code: |-
+    runCode(tagData({ consentModeObject: '{"ad_storage":null,"ad_user_data":null}' }));
+    assertThat(sent().consent_mode).isUndefined();
+    assertThat(logged('no consent signal')).isTrue();
+    assertSucceeded();
 
 - name: P0 TCF - a valid TCF v2 string is forwarded
   code: |-
