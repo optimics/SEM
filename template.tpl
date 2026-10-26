@@ -613,7 +613,7 @@ ___TEMPLATE_PARAMETERS___
         "checkboxText": "Use Optimistic Scenario",
         "simpleValueType": true,
         "defaultValue": true,
-        "help": "Returns success to GTM immediately without waiting for the API response. Warning: 4xx/5xx responses are logged as errors but GTM still reports success. Disable for higher observability during rollout or for critical conversion tags."
+        "help": "Returns success to GTM immediately without waiting for the API response. Warning: 4xx/5xx responses and failed requests are logged as errors but GTM still reports success. Disable for higher observability during rollout or for critical conversion tags. The request times out after 5 seconds."
       },
       {
         "type": "CHECKBOX",
@@ -967,6 +967,8 @@ if (sznaiid.writeCookie) {
   writeSznaiidCookie(sznaiid.value);
 }
 
+// Test Mode diagnostics: the consent summary, the raw GA4 x-ga-gcs value (logged only,
+// never decoded into the payload) and the source of sid / udid, next to the payload.
 log({
   Name: 'Seznam SEM',
   Type: 'Request',
@@ -974,9 +976,17 @@ log({
   EventName: resolvedEventName,
   RequestMethod: 'POST',
   RequestUrl: apiUrl,
+  Consent: {
+    consent_mode: payload.consent_mode || 'absent',
+    consent_string: payload.consent_string ? 'present' : 'absent',
+    s2s_headers: payload.s2s_headers ? 'sent' : 'not sent',
+    x_ga_gcs: getType(inboundEvent) === 'object' ? inboundEvent['x-ga-gcs'] : undefined
+  },
+  Identity: identity,
   RequestBody: payload
 });
 
+// Seznam recommends a 3-5 s timeout (s2s.html); the sendHttpRequest default is 15 s.
 sendHttpRequest(
   apiUrl,
   {
@@ -985,7 +995,8 @@ sendHttpRequest(
       'X-Client-Id': 'gtm-server-template-seznam-sem',
       'X-Client-Version': TEMPLATE_VERSION
     },
-    method: 'POST'
+    method: 'POST',
+    timeout: 5000
   },
   JSON.stringify(payload)
 ).then(function(result) {
@@ -1014,7 +1025,11 @@ sendHttpRequest(
   } else if (result.statusCode < 200 || result.statusCode >= 300) {
     logHttpError(result);
   }
-}).catch(function() {
+}).catch(function(error) {
+  // sendHttpRequest rejects with { reason: 'failed' | 'timed_out' }.
+  var reason = (error && error.reason) ? error.reason : JSON.stringify(error);
+  logToConsole('Seznam SEM [ERROR]: request to Seznam failed: ' + ('' + reason).substring(0, 200) +
+    ' | event=' + resolvedEventName + ' | trace=' + traceId);
   logToBigQuery({ url: apiUrl, body: payload });
 
   if (!data.useOptimisticScenario) {
@@ -2013,11 +2028,18 @@ function log(message) {
 
 function logHttpError(result) {
   var bodySnippet = result.body ? JSON.stringify(result.body).substring(0, 200) : 'n/a';
+  var requestId = result.headers ? result.headers['x-request-id'] : undefined;
+  // Seznam answers 401/403 for an invalid SEM ID or an endpoint the account cannot use (s2s.html).
+  var hint = (result.statusCode === 401 || result.statusCode === 403)
+    ? ' | hint=Seznam rejected the SEM ID or the endpoint access: use the S2S SEM ID from Sklik ' +
+      '(advanced account settings), not the sul.js SEM ID'
+    : '';
   logToConsole('Seznam SEM [ERROR]: HTTP ' + result.statusCode +
     ' | event=' + resolvedEventName +
     ' | semId=' + data.semId +
+    ' | request_id=' + requestId +
     ' | trace=' + traceId +
-    ' | body=' + bodySnippet);
+    ' | body=' + bodySnippet + hint);
 }
 
 function logToBigQuery(requestInfo, responseInfo) {
