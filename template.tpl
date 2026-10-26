@@ -4599,6 +4599,118 @@ scenarios:
     runCode(tagData({ userRegion: true, userState: 'HASH_STATE', userEmail: 'HASH_EM' }));
     assertThat(sent().user_ids.user_data.region).isUndefined();
     assertThat(logged('user_data.region: expected string or number')).isTrue();
+
+- name: V3-REVIEW R2 - a BigQuery insertion error logs its reason code and never the row, with and without Test Mode
+  code: |-
+    bigQueryRejection = [{
+      errors: [{ reason: 'invalid', message: 'bad ' + MARKER }],
+      row: { request_body: '{"review_email":"' + MARKER + '","consent_mode":{"ad_storage":"denied"}}' }
+    }];
+    runWithAndWithoutTestMode();
+    assertErrorsWithoutPayload('BigQuery insert failed: invalid | rows=1', 'gtmOnSuccess');
+
+- name: V3-REVIEW R2 - a documented top-level BigQuery reason is logged verbatim
+  code: |-
+    bigQueryRejection = [{ reason: 'invalid' }];
+    runWithAndWithoutTestMode();
+    assertErrorsWithoutPayload('BigQuery insert failed: invalid | rows=1', 'gtmOnSuccess');
+
+- name: V3-REVIEW R2 - a marker as the top-level BigQuery reason is logged as unknown
+  code: |-
+    bigQueryRejection = [{ reason: MARKER }];
+    runWithAndWithoutTestMode();
+    assertErrorsWithoutPayload('BigQuery insert failed: unknown | rows=1', 'gtmOnSuccess');
+
+- name: V3-REVIEW R2 - a marker as the nested BigQuery reason is logged as unknown
+  code: |-
+    bigQueryRejection = [{ errors: [{ reason: MARKER }], row: {} }];
+    runWithAndWithoutTestMode();
+    assertErrorsWithoutPayload('BigQuery insert failed: unknown | rows=1', 'gtmOnSuccess');
+
+- name: V3-REVIEW R2 - a marker as the transport rejection reason is logged as unknown
+  code: |-
+    httpResult = 'reject';
+    rejection = { reason: MARKER };
+    runWithAndWithoutTestMode();
+    assertErrorsWithoutPayload('request to Seznam failed: unknown | event=PageView', 'gtmOnFailure');
+
+- name: V3-REVIEW R2 - the documented transport reason timed_out is logged verbatim
+  code: |-
+    httpResult = 'reject';
+    runWithAndWithoutTestMode();
+    assertErrorsWithoutPayload('request to Seznam failed: timed_out | event=PageView', 'gtmOnFailure');
+
+- name: V3-REVIEW R2 - an unknown rejection object is logged as unknown
+  code: |-
+    httpResult = 'reject';
+    rejection = { weird: { x: MARKER } };
+    runWithAndWithoutTestMode();
+    assertErrorsWithoutPayload('request to Seznam failed: unknown | event=PageView', 'gtmOnFailure');
+
+- name: V3-REVIEW R2 - a 400 body that echoes the payload stays out of the ERROR line and in the Test Mode Response line
+  code: |-
+    httpResult = { statusCode: 400, headers: { 'x-request-id': 'REQ-400' }, body: 'bad ' + MARKER + ' denied' };
+    runWithAndWithoutTestMode();
+    assertErrorsWithoutPayload('HTTP 400 | event=PageView | semId=' + SEM_ID + ' | request_id=REQ-400', 'gtmOnFailure');
+    // Only the Test Mode run logs the Response diagnostic line, with the body.
+    callLater(() => {
+      let responseLines = 0;
+      for (let n = 0; n < logs.length; n++) {
+        if (logs[n].indexOf('"Type":"Response"') !== -1 && logs[n].indexOf('bad ' + MARKER) !== -1) responseLines++;
+      }
+      assertThat(responseLines, 'Response lines with the body').isEqualTo(1);
+    });
+
+- name: V3-REVIEW R3 - a non-string page_location is skipped and the explicit Event URL is sent, with GA4 Auto-Map on and off
+  code: |-
+    for (let n = 0; n < NON_STRING_URLS.length; n++) {
+      mock('getAllEventData', { event_name: 'page_view', page_location: NON_STRING_URLS[n] });
+      runCode(tagData({ enableGa4AutoMap: true }));
+      runCode(tagData({ enableGa4AutoMap: false }));
+    }
+    assertThat(requests.length, 'number of requests').isEqualTo(8);
+    for (let n = 0; n < requests.length; n++) {
+      assertThat(requests[n].body.event_url).isEqualTo('https://shop.example/');
+      assertThat(requests[n].body.event_data.sznaiid).isUndefined();
+    }
+    assertApi('setCookie').wasNotCalled();
+    callLater(() => { assertApi('gtmOnFailure').wasNotCalled(); });
+
+- name: V3-REVIEW R3 - with a non-string page_location the Referer supplies event_url and the sznaiid click ID
+  code: |-
+    const REFERER = 'https://shop.example/landing?sznaiid=CLICK-R3';
+    mock('getRequestHeader', (name) => (name === 'referer' ? REFERER : undefined));
+    let cookies = [];
+    mock('setCookie', (name, value) => { cookies.push(name + '=' + value); });
+    for (let n = 0; n < NON_STRING_URLS.length; n++) {
+      mock('getAllEventData', { event_name: 'page_view', page_location: NON_STRING_URLS[n] });
+      runCode(tagData({ eventUrl: '', enableGa4AutoMap: true }));
+      runCode(tagData({ eventUrl: '', enableGa4AutoMap: false }));
+    }
+    assertThat(requests.length, 'number of requests').isEqualTo(8);
+    for (let n = 0; n < requests.length; n++) {
+      assertThat(requests[n].body.event_url).isEqualTo(REFERER);
+      assertThat(requests[n].body.event_data.sznaiid).isEqualTo('CLICK-R3');
+    }
+    assertThat(cookies.length, 'cookie writes').isEqualTo(8);
+    for (let n = 0; n < cookies.length; n++) assertThat(cookies[n]).isEqualTo('sznaiid=CLICK-R3');
+    callLater(() => { assertApi('gtmOnFailure').wasNotCalled(); });
+
+- name: V3-REVIEW R3 - with a non-string page_location and no other URL source event_url is empty and no cookie is written
+  code: |-
+    for (let n = 0; n < NON_STRING_URLS.length; n++) {
+      mock('getAllEventData', { event_name: 'page_view', page_location: NON_STRING_URLS[n] });
+      runCode(tagData({ eventUrl: '', enableGa4AutoMap: true }));
+      runCode(tagData({ eventUrl: '', enableGa4AutoMap: false }));
+    }
+    assertThat(requests.length, 'number of requests').isEqualTo(8);
+    for (let n = 0; n < requests.length; n++) {
+      // 2.3.1 sends an empty event_url when no source has one.
+      assertThat(requests[n].body.event_url).isEqualTo('');
+      assertThat(requests[n].body.event_data.sznaiid).isUndefined();
+    }
+    assertApi('setCookie').wasNotCalled();
+    callLater(() => { assertApi('gtmOnFailure').wasNotCalled(); });
 setup: |-
   // Sandboxed test code has no JSON, Promise or callLater globals; require them like the template does.
   const JSON = require('JSON');
@@ -4611,15 +4723,16 @@ setup: |-
   const TCF_STRING = 'CQGzWAAQGzWAAAHABBENBKFsAP_gAEPgAAAAKZtV_G__bXlv-X736ftkeY1f9_h77sQxBhfJs.4FzLvW_JwX32EzNE36tqYKmRIAu3bBIQNtHJjUTVChaogVrzDsak2coTtKJ-BkiHMRe2dY';
 
   // Every outgoing request and console line of the scenario. Set httpResult to change the response,
-  // or to 'reject' to simulate a transport failure.
+  // or to 'reject' to simulate a transport failure that rejects with `rejection`.
   let requests = [];
   let logs = [];
   let httpResult = { statusCode: 200, headers: { 'x-request-id': 'REQ-1' }, body: '' };
+  let rejection = { reason: 'timed_out' };
 
   mock('sendHttpRequest', (url, options, body) => {
     requests.push({ url: url, options: options, body: JSON.parse(body) });
     return Promise.create((resolve, reject) => {
-      if (httpResult === 'reject') reject({ reason: 'timed_out' });
+      if (httpResult === 'reject') reject(rejection);
       else resolve(httpResult);
     });
   });
@@ -4674,6 +4787,64 @@ setup: |-
       assertApi('gtmOnSuccess').wasNotCalled();
     });
   }
+
+  // V3-REVIEW R2: ERROR lines are logged whatever Test Mode holds, so they must never carry the MARKER
+  // that runWithAndWithoutTestMode() puts into the payload (review_email) or its consent value
+  // ('denied'). It runs the tag with Test Mode off and on and BigQuery logging on; insertedRows
+  // collects the inserted rows, and the insert rejects with bigQueryRejection when it is set.
+  const MARKER = 'mk@example.invalid';
+  let insertedRows = [];
+  let bigQueryRejection;
+  function runWithAndWithoutTestMode() {
+    mockObject('BigQuery', {
+      insert: (connection, list) => {
+        for (let n = 0; n < list.length; n++) insertedRows.push(list[n]);
+        return Promise.create((resolve, reject) => {
+          if (bigQueryRejection) reject(bigQueryRejection);
+          else resolve();
+        });
+      }
+    });
+    const modes = [false, true];
+    for (let n = 0; n < modes.length; n++) {
+      runCode(tagData({
+        testMode: modes[n],
+        reviewEmail: MARKER,
+        consentModeObject: { ad_storage: 'denied' },
+        bigQueryLogType: 'always',
+        logBigQueryDatasetId: 'dataset',
+        logBigQueryTableId: 'table'
+      }));
+    }
+  }
+
+  // After the two runs: one ERROR line per run that contains `expected` and neither the marker nor
+  // the consent value, `callback` for every run, one request per run, and the full payload in every
+  // BigQuery row.
+  function assertErrorsWithoutPayload(expected, callback) {
+    callLater(() => {
+      const errors = [];
+      for (let n = 0; n < logs.length; n++) {
+        if (logs[n].indexOf('[ERROR]') !== -1) errors.push(logs[n]);
+      }
+      for (let n = 0; n < errors.length; n++) {
+        assertThat(errors[n], 'ERROR line').doesNotContain(MARKER, 'denied');
+        assertThat(errors[n], 'ERROR line').contains(expected);
+      }
+      assertThat(errors.length, 'ERROR lines').isEqualTo(2);
+      assertThat(requests.length, 'number of requests').isEqualTo(2);
+      assertApi(callback).wasCalled();
+      assertApi(callback === 'gtmOnSuccess' ? 'gtmOnFailure' : 'gtmOnSuccess').wasNotCalled();
+      assertThat(insertedRows.length, 'BigQuery rows').isEqualTo(2);
+      for (let n = 0; n < insertedRows.length; n++) {
+        assertThat(insertedRows[n].request_body, 'BigQuery request_body').contains(MARKER, 'denied');
+      }
+    });
+  }
+
+  // V3-REVIEW R3: page_location values a non-GA4 client could write; the object and the array carry a
+  // click ID that must not be used.
+  const NON_STRING_URLS = [{ url: 'https://shop.example/?sznaiid=OBJECT' }, 123, true, ['https://shop.example/?sznaiid=ARRAY']];
 
   // Configuration and validation failures stop the tag synchronously: no request, no cookie write.
   function assertFailedWithoutRequest() {
