@@ -1300,7 +1300,7 @@ function extractFromEventData(data, ev) {
 
   // event_url / event_id are always extracted when auto-map is on — they are
   // top-level payload fields, not gated by the per-section sub-toggles.
-  if (ev.page_location) out.eventUrl = ev.page_location;
+  if (getType(ev.page_location) === 'string' && ev.page_location) out.eventUrl = ev.page_location;
   var ga4EventId = getFirstValue([ev.event_id, ev.transaction_id], 'id');
   if (ga4EventId !== undefined) out.eventId = ga4EventId;
 
@@ -1375,9 +1375,9 @@ function extractFromEventData(data, ev) {
  * sznaiid cookie + URL extraction
  ******************************************************************************/
 
-// Try one URL; return sznaiid value or '' if not found / preview ping / unparseable.
+// Try one URL; return sznaiid value or '' if not a string / not found / preview ping / unparseable.
 function extractFromSingleUrl(url) {
-  if (!url) return '';
+  if (getType(url) !== 'string' || !url) return '';
   // FB CAPI ref pattern for preview-ping guard (sandbox-safe; matches at offset 0).
   if (url.lastIndexOf('https://gtm-msr.appspot.com/', 0) === 0) return '';
   var parsed = parseUrl(url);
@@ -1395,8 +1395,9 @@ function extractFromSingleUrl(url) {
 // event as preview-context and short-circuit — do not fall back to referer.
 // Otherwise a preview hit on a real page with ?sznaiid=... in referer would
 // write a real attribution cookie during a debug session.
+// A page_location that is not a string (a non-GA4 client can write any type) is skipped.
 function extractSznaiidFromUrl(ev) {
-  var pageLoc = (getType(ev) === 'object' && ev.page_location) ? ev.page_location : '';
+  var pageLoc = (getType(ev) === 'object' && getType(ev.page_location) === 'string') ? ev.page_location : '';
   if (pageLoc && pageLoc.lastIndexOf('https://gtm-msr.appspot.com/', 0) === 0) return '';
   return extractFromSingleUrl(pageLoc) ||
          extractFromSingleUrl(getRequestHeader('referer')) ||
