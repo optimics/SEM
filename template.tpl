@@ -1242,32 +1242,21 @@ function resolveEventName(data, ev) {
   return contains(objectApi.keys(GA4_EVENT_NAME_MAP), ga4Name) ? GA4_EVENT_NAME_MAP[ga4Name] : 'ga4:' + ga4Name;
 }
 
-// FE-parity helper: returns the first usable candidate and its index, so fallback candidates can be
-// tried. 'id' / 'text': a non-blank string or a finite number, returned RAW (the normalization pass
-// converts it); objects, booleans, arrays, NaN/Infinity are skipped, and for 'id' so are the
-// placeholders 'undefined'/'null'. 'number': a canonical finite number.
-function getFirstValue(candidates, targetType) {
-  for (var i = 0; i < candidates.length; i++) {
-    var v = candidates[i];
-    if (isMissing(v)) continue;
-    if (targetType === 'number') {
-      var num = toNumber(v);
-      if (num !== undefined) return { value: num, index: i };
-      continue;
-    }
-    if (toText(v, targetType === 'id') !== undefined) return { value: v, index: i };
-  }
-  return { value: undefined, index: -1 };
-}
-
-// The first usable value of source[keys[i]]. keys[0] is the GA4 key; a later (Shoptet/MeasureHive)
-// key that wins is reported as legacy use under `label` + key.
+// FE-parity helper: the first usable value of source[keys[i]]. 'id' / 'text': a non-blank string or a
+// finite number, returned RAW (the normalization pass converts it); objects, booleans, arrays,
+// NaN/Infinity are skipped, and for 'id' so are the placeholders 'undefined'/'null'. 'number': a
+// canonical finite number. keys[0] is the GA4 key; a later (Shoptet/MeasureHive) key that wins is
+// reported as legacy use under `label` + key.
 function pickGa4(source, keys, targetType, label) {
-  var candidates = [];
-  for (var i = 0; i < keys.length; i++) candidates.push(source[keys[i]]);
-  var picked = getFirstValue(candidates, targetType);
-  if (picked.index > 0) noteLegacy('ga4', label + keys[picked.index]);
-  return picked.value;
+  for (var i = 0; i < keys.length; i++) {
+    var v = source[keys[i]];
+    if (isMissing(v)) continue;
+    var value = targetType === 'number' ? toNumber(v) : (toText(v, targetType === 'id') === undefined ? undefined : v);
+    if (value === undefined) continue;
+    if (i > 0) noteLegacy('ga4', label + keys[i]);
+    return value;
+  }
+  return undefined;
 }
 
 // FE-parity helper: round a finite number to 2 decimal places.
@@ -1293,24 +1282,16 @@ function buildItemCategory(it) {
   }
   // Shoptet's currentCategory / defaultCategory can be an array (FE-template parity).
   // Without explicit array handling, '' + ['A','B'] would yield 'A,B' instead of 'A | B'.
-  if (it.currentCategory) {
-    noteLegacy('ga4', 'ga4.items.currentCategory');
-    return getType(it.currentCategory) === 'array'
-      ? it.currentCategory.join(' | ')
-      : '' + it.currentCategory;
-  }
-  if (it.defaultCategory) {
-    noteLegacy('ga4', 'ga4.items.defaultCategory');
-    return getType(it.defaultCategory) === 'array'
-      ? it.defaultCategory.join(' | ')
-      : '' + it.defaultCategory;
+  var shoptetKeys = ['currentCategory', 'defaultCategory'];
+  for (var k = 0; k < shoptetKeys.length; k++) {
+    var shoptet = it[shoptetKeys[k]];
+    if (!shoptet) continue;
+    noteLegacy('ga4', 'ga4.items.' + shoptetKeys[k]);
+    return getType(shoptet) === 'array' ? shoptet.join(' | ') : '' + shoptet;
   }
   var ee = [];
-  if (it.item_category)  ee.push(it.item_category);
-  if (it.item_category2) ee.push(it.item_category2);
-  if (it.item_category3) ee.push(it.item_category3);
-  if (it.item_category4) ee.push(it.item_category4);
-  if (it.item_category5) ee.push(it.item_category5);
+  var levels = ['item_category', 'item_category2', 'item_category3', 'item_category4', 'item_category5'];
+  for (var l = 0; l < levels.length; l++) if (it[levels[l]]) ee.push(it[levels[l]]);
   return ee.length > 0 ? ee.join(' | ') : undefined;
 }
 
