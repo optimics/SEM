@@ -925,6 +925,15 @@ const GA4_EVENT_DATA_MAP = {
   search_term: 'search_string'
 };
 
+// Reason codes of the BigQuery error table; any other reason is logged as 'unknown'.
+const BIGQUERY_ERROR_REASONS = [
+  'accessDenied', 'attributeError', 'backendError', 'badRequest', 'billingNotEnabled',
+  'billingTierLimitExceeded', 'blocked', 'duplicate', 'internalError', 'invalid', 'invalidQuery',
+  'invalidUser', 'jobBackendError', 'jobInternalError', 'jobRateLimitExceeded', 'notFound',
+  'notImplemented', 'proxyAuthenticationRequired', 'quotaExceeded', 'rateLimitExceeded',
+  'resourceInUse', 'resourcesExceeded', 'responseTooLarge', 'stopped', 'tableUnavailable', 'timeout'
+];
+
 const traceId = getRequestHeader('trace-id');
 
 // The inbound event is read once; GA4 Auto-Map and the sznaiid URL lookup share it.
@@ -1038,8 +1047,8 @@ sendHttpRequest(
   }
 }).catch(function(error) {
   // sendHttpRequest rejects with { reason: 'failed' | 'timed_out' }.
-  var reason = (error && error.reason) ? error.reason : JSON.stringify(error);
-  logToConsole('Seznam SEM [ERROR]: request to Seznam failed: ' + ('' + reason).substring(0, 200) +
+  var reason = (getType(error) === 'object' && (error.reason === 'failed' || error.reason === 'timed_out')) ? error.reason : 'unknown';
+  logToConsole('Seznam SEM [ERROR]: request to Seznam failed: ' + reason +
     ' | event=' + resolvedEventName + ' | trace=' + traceId);
   logToBigQuery({ url: apiUrl, body: payload });
 
@@ -2066,7 +2075,6 @@ function log(message) {
 }
 
 function logHttpError(result) {
-  var bodySnippet = result.body ? JSON.stringify(result.body).substring(0, 200) : 'n/a';
   var requestId = result.headers ? result.headers['x-request-id'] : undefined;
   // Seznam answers 401/403 for an invalid SEM ID or an endpoint the account cannot use (s2s.html).
   var hint = (result.statusCode === 401 || result.statusCode === 403)
@@ -2077,8 +2085,7 @@ function logHttpError(result) {
     ' | event=' + resolvedEventName +
     ' | semId=' + data.semId +
     ' | request_id=' + requestId +
-    ' | trace=' + traceId +
-    ' | body=' + bodySnippet + hint);
+    ' | trace=' + traceId + hint);
 }
 
 function logToBigQuery(requestInfo, responseInfo) {
@@ -2109,7 +2116,10 @@ function logToBigQuery(requestInfo, responseInfo) {
     [bqRow],
     { ignoreUnknownValues: true }
   ).catch(function(errors) {
-    logToConsole('Seznam SEM [ERROR]: BigQuery insert failed: ' + JSON.stringify(errors));
+    var first = getType(errors) === 'array' && getType(errors[0]) === 'object' ? errors[0] : {};
+    var reason = getType(first.errors) === 'array' && getType(first.errors[0]) === 'object' ? first.errors[0].reason : first.reason;
+    logToConsole('Seznam SEM [ERROR]: BigQuery insert failed: ' + (contains(BIGQUERY_ERROR_REASONS, reason) ? reason : 'unknown') +
+      ' | rows=' + (getType(errors) === 'array' ? errors.length : 0) + ' | trace=' + traceId);
   });
 }
 
