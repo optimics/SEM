@@ -1282,8 +1282,8 @@ function roundTo2(n) {
 // The platform sources are reported as legacy use. Returns undefined when no source matches.
 function buildItemCategory(it) {
   if (it.category && getType(it.category) === 'string') {
+    noteLegacy('ga4', 'ga4.items.category');
     if (it.category.indexOf('/') !== -1) {
-      noteLegacy('ga4', 'ga4.items.category');
       var parts = [];
       var split = it.category.split('/');
       for (var s = 0; s < split.length; s++) if (split[s]) parts.push(split[s]);
