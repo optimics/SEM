@@ -1109,14 +1109,19 @@ function applyLegacyStatus(merged) {
 function validate(payload) {
   var ed = payload.event_data;
   var problem;
+  // Whether 2.3.1 with Strict off would have sent this hit: only a malformed SEM ID and an unknown
+  // name that is not an Auto name (2.3.1 failed an unmapped Auto name as an empty name).
+  var looseInV2 = false;
   if (!payload.event_name) {
     problem = 'eventName is required';
   } else if (!ed.sem_id) {
     problem = 'semId is required';
   } else if (!isValidSemId(ed.sem_id)) {
     problem = 'semId must be 24 characters of 0-9 and a-z (^[0-9a-z]{24}$)';
+    looseInV2 = true;
   } else if (!contains(ALLOWED_EVENTS, payload.event_name)) {
     problem = 'Unknown event name: ' + payload.event_name;
+    looseInV2 = data.eventNameSelect !== 'auto';
   } else if (payload.event_name === 'Purchase') {
     // After normalization a present order_id/currency is a non-empty string and value a finite
     // number (0 is valid). `contents` is recommended for retargeting/attribution but not required.
@@ -1131,8 +1136,9 @@ function validate(payload) {
     }
   }
   if (!problem) return undefined;
-  // A stored v2 "Strict Event Validation" off gets a hint; it does not prove that the tag is old.
-  var hint = data.strictEventValidation === false ? ' (v2 loose validation no longer applies)' : '';
+  // A stored v2 "Strict Event Validation" off gets a hint where 2.3.1 would have sent the hit; it
+  // does not prove that the tag is old.
+  var hint = (looseInV2 && data.strictEventValidation === false) ? ' (v2 loose validation no longer applies)' : '';
   return problem + ' | event=' + payload.event_name + ' | trace=' + traceId + hint;
 }
 
