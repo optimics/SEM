@@ -22,7 +22,7 @@ ___INFO___
     "id": "seznam_sem",
     "displayName": "Seznam SEM"
   },
-  "description": "Server-side Google Tag Manager template for sending conversion events to the Seznam.cz SEM (Seznam Event Measurement) API. Map data per field or via a single object variable, with optional GA4 auto-mapping, consent mode, sid/udid cookie fallback, and BigQuery logging.",
+  "description": "Server-side GTM tag that sends conversion events to the Seznam SEM API (rtgconv). Object or per-field mapping, optional GA4 auto-map, consent mode and sid/udid cookie fallback.",
   "containerContexts": [
     "SERVER"
   ],
