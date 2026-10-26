@@ -59,8 +59,8 @@ Status from the playground runs of 2026-10-26 (`review/gtm-verification/v3-gates
 ### Notes
 
 - Migration guide: README section "Přechod na verzi 3".
-- Tests: 166 → 221 scenarios. Four upgrade fixtures assert the exact serialized body that 2.3.1 sent for the same inputs (playground tags 20 and 17, every legacy field at once, a tag saved before the v2.2/v2.3 parameters existed); the only differences allowed are upgrade notes 3, 4 and 12. A legacy field-mapping scenario checks all 31 v2.x data fields against an independent parameter-to-key table.
-- Sandboxed JS: 1331 → 1421 lines. The UI shrinks; the JS keeps the aliases, platform keys and BigQuery logging.
+- Tests: 177 → 240 scenarios. Four upgrade fixtures assert the exact serialized body that 2.3.1 sent for the same inputs (playground tags 20 and 17, every legacy field at once, a tag saved before the v2.2/v2.3 parameters existed); the only differences allowed are upgrade notes 3, 4 and 12. A legacy field-mapping scenario checks all 31 v2.x data fields against an independent parameter-to-key table.
+- Sandboxed JS: 1342 → 1421 lines. The UI shrinks; the JS keeps the aliases, platform keys and BigQuery logging.
 - Items in `contents` without `id`, `content_name` and `content_category` are kept (decision of 2026-10-26, open in 2.3.1).
 - The 30-day sznaiid lifetime is a single constant (`SZNAIID_MAX_AGE`) pending Seznam's answer on the lifetime `sem.js` uses.
 - `metadata.yaml` is re-pinned only after the release commit is pushed.
