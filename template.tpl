@@ -3992,8 +3992,8 @@ scenarios:
     assertThat(logged('event_data.unexpected is not a Seznam field')).isTrue();
     assertThat(logged('user_data.foo is not a Seznam field')).isTrue();
     assertThat(logged('event_data.contents[0].color is not a Seznam field')).isTrue();
-    assertThat(logged('event_data.order_id: expected')).isTrue();
-    assertThat(logged('user_data.ph: expected')).isTrue();
+    assertThat(logged('event_data.order_id is the placeholder string')).isTrue();
+    assertThat(logged('user_data.ph is the placeholder string')).isTrue();
 
 - name: P0 quantity - GA4 items keep valid quantities and drop invalid ones
   code: |-
@@ -4354,6 +4354,193 @@ scenarios:
     assertThat(requestLine).contains('"consent_string":"present"');
     assertThat(requestLine).contains('"sid":"cookie"');
     assertThat(requestLine).contains('"udid":"missing"');
+- name: P0 R4 - GA4 order_id skips objects, booleans and arrays and the Purchase fails
+  code: |-
+    mock('getAllEventData', { transaction_id: { oops: 1 }, id: true, orderNo: ['A', 'B'], currency: 'CZK', value: 100 });
+    runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
+    assertFailedWithoutRequest();
+    assertThat(logged('Purchase requires: order_id')).isTrue();
+
+- name: P0 R4 - GA4 order_id skips NaN and Infinity and takes the next alias
+  code: |-
+    mock('getAllEventData', { transaction_id: 0 / 0, id: 1 / 0, orderNo: 'NO-1', currency: 'CZK', value: 100 });
+    runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
+    assertThat(sent().event_data.order_id).isEqualTo('NO-1');
+    assertSucceeded();
+
+- name: P0 R4 - GA4 transaction_id and item_id 0 are sent as the string 0
+  code: |-
+    mock('getAllEventData', {
+      transaction_id: 0,
+      currency: 'CZK',
+      value: 10,
+      items: [{ item_id: 0, quantity: 1 }]
+    });
+    runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
+    assertThat(sent().event_data.order_id).isStrictlyEqualTo('0');
+    assertThat(sent().event_id).isStrictlyEqualTo('0');
+    assertThat(sent().event_data.contents).isEqualTo([{ id: '0', quantity: 1 }]);
+    assertSucceeded();
+
+- name: P0 R4 - GA4 item id and name skip non-scalar values and use the alias
+  code: |-
+    mock('getAllEventData', {
+      items: [
+        { item_id: { x: 1 }, id: 'B', item_name: { a: 1 }, name: 'Real name', quantity: 1 },
+        { item_id: true, quantity: 1 },
+        { item_id: ['A', 'B'], quantity: 1 }
+      ]
+    });
+    runCode(tagData({ eventNameSelect: 'ViewContent', enableGa4AutoMap: true }));
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'B', content_name: 'Real name', quantity: 1 }]);
+    assertThat(logged('2 GA4 items skipped')).isTrue();
+
+- name: P0 R7 - placeholder quantities in GA4 items count as missing
+  code: |-
+    mock('getAllEventData', {
+      items: [{ item_id: 'A', quantity: 'null' }, { item_id: 'B', quantity: 'undefined' }]
+    });
+    runCode(tagData({ eventNameSelect: 'AddToCart', enableGa4AutoMap: true }));
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'A', quantity: 1 }, { id: 'B', quantity: 1 }]);
+    assertThat(logged('event_data.contents[0].quantity is the placeholder string')).isTrue();
+
+- name: P0 R7 - a placeholder quantity in the object counts as missing, abc still drops the item
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'AddToCart',
+      eventDataObject: { contents: [{ id: 'A', quantity: 'null' }, { id: 'X', quantity: 'abc' }] }
+    }));
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'A', quantity: 1 }]);
+
+- name: P0 R7 - a placeholder quantity in the Contents field counts as missing
+  code: |-
+    runCode(tagData({ eventNameSelect: 'AddToCart', contents: [{ id: 'A', quantity: 'undefined' }] }));
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'A', quantity: 1 }]);
+
+- name: P0 R7 - a placeholder quantity in an override row counts as missing
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'AddToCart',
+      eventDataOverrides: [{ name: 'contents', value: [{ id: 'A', quantity: 'null' }] }]
+    }));
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'A', quantity: 1 }]);
+
+- name: P0 R8 - placeholder strings in later layers do not erase GA4 values
+  code: |-
+    mock('getAllEventData', { transaction_id: 'TX-8', currency: 'CZK', value: 80 });
+    runCode(tagData({
+      eventNameSelect: 'Purchase',
+      enableGa4AutoMap: true,
+      eventDataObject: { order_id: 'null', value: 'undefined' },
+      eventDataOverrides: [{ name: 'currency', value: 'undefined' }]
+    }));
+    assertThat(sent().event_data).isEqualTo({ order_id: 'TX-8', currency: 'CZK', value: 80, sem_id: SEM_ID });
+    assertThat(logged('event_data.order_id is the placeholder string')).isTrue();
+    assertSucceeded();
+
+- name: P0 R8 - free-text keys keep the literal words null and undefined
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'Search',
+      eventDataObject: {
+        search_string: 'null',
+        contents: [{ id: 'A', content_name: 'undefined', content_category: 'null' }]
+      }
+    }));
+    assertThat(sent().event_data.search_string).isEqualTo('null');
+    assertThat(sent().event_data.contents).isEqualTo([
+      { id: 'A', content_name: 'undefined', content_category: 'null', quantity: 1 }
+    ]);
+
+- name: P0 R8 - placeholder user data and event ID fall back to earlier sources
+  code: |-
+    mock('getAllEventData', { event_id: 'EV-1', user_data: { sha256_phone_number: 'HASH_PH' } });
+    runCode(tagData({
+      enableGa4AutoMap: true,
+      eventId: 'undefined',
+      userDataObject: { em: 'null', email: 'HASH_ALIAS' },
+      userPhone: 'undefined'
+    }));
+    assertThat(sent().event_id).isEqualTo('EV-1');
+    assertThat(sent().user_ids.user_data).isEqualTo({ em: 'HASH_ALIAS', ph: 'HASH_PH' });
+
+- name: P0 R9 - consent values are trimmed before matching
+  code: |-
+    runCode(tagData({ consentModeObject: { ad_storage: ' granted ', ad_user_data: ' 0 ' } }));
+    assertThat(sent().consent_mode).isEqualTo({ ad_storage: 'granted', ad_user_data: 'denied' });
+    assertSucceeded();
+
+- name: P0 R9 - a trimmed Granted still fails the tag
+  code: |-
+    runCode(tagData({ consentModeObject: { ad_storage: ' Granted ' } }));
+    assertFailedWithoutRequest();
+
+- name: P0 R10 - the Status field goes through the boolean normalizer
+  code: |-
+    runCode(tagData({ eventNameSelect: 'Subscribe', statusEnabled: true, status: '1' }));
+    assertThat(sent().event_data.status).isStrictlyEqualTo(true);
+
+- name: P0 R10 - an enabled Status field without a value still sends false
+  code: |-
+    runCode(tagData({ eventNameSelect: 'CompleteRegistration', statusEnabled: true }));
+    assertThat(sent().event_data.status).isStrictlyEqualTo(false);
+
+- name: P0 R10 - CompleteRegistration gets no default when a layer sent an invalid status
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'CompleteRegistration',
+      eventDataOverrides: [{ name: 'status', value: 'no' }]
+    }));
+    assertThat(sent().event_data.status).isUndefined();
+    assertThat(logged('event_data.status: expected boolean')).isTrue();
+
+- name: P0 R11 - an invalid content_type is omitted and the product default applies
+  code: |-
+    runCode(tagData({ eventDataObject: { content_type: 'Produkt', contents: [{ id: 'A' }] } }));
+    assertThat(sent().event_data.content_type).isEqualTo('product');
+    assertThat(logged('event_data.content_type: expected one of page, product, product_group, search')).isTrue();
+
+- name: P0 R11 - an invalid override content_type without contents is omitted
+  code: |-
+    runCode(tagData({ eventDataOverrides: [{ name: 'content_type', value: 'category' }] }));
+    assertThat(sent().event_data.content_type).isUndefined();
+
+- name: P0 R12 - whitespace-only JSON fields count as missing under Strict
+  code: |-
+    runCode(tagData({ strictEventValidation: true, eventDataObject: '   ', contents: '  ' }));
+    assertThat(sent().event_data).isEqualTo({ sem_id: SEM_ID });
+    assertSucceeded();
+
+- name: P0 R12 - boolean false in a JSON object field is an input error under Strict
+  code: |-
+    runCode(tagData({ strictEventValidation: true, userDataObject: false }));
+    assertFailedWithoutRequest();
+    assertThat(logs).contains('Seznam SEM [ERROR]: userDataObject: expected object or JSON string, got boolean');
+
+- name: P0 contents - native items without an id are kept
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'AddToCart',
+      contents: [
+        { quantity: 2, unit_price: 100 },
+        { content_name: 'Name only' },
+        { content_category: 'Category only' },
+        { id: 'ID-only' }
+      ]
+    }));
+    assertThat(sent().event_data.contents).isEqualTo([
+      { quantity: 2, unit_price: 100 },
+      { content_name: 'Name only', quantity: 1 },
+      { content_category: 'Category only', quantity: 1 },
+      { id: 'ID-only', quantity: 1 }
+    ]);
+
+- name: P0 contents - GA4-shaped keys in manual contents are stripped with WARNs
+  code: |-
+    runCode(tagData({ eventNameSelect: 'AddToCart', contents: [{ item_id: 'X', price: 10, quantity: 2 }] }));
+    assertThat(sent().event_data.contents).isEqualTo([{ quantity: 2 }]);
+    assertThat(logged('event_data.contents[0].item_id is not a Seznam field')).isTrue();
+    assertThat(logged('event_data.contents[0].price is not a Seznam field')).isTrue();
 setup: |-
   // Sandboxed test code has no JSON, Promise or callLater globals; require them like the template does.
   const JSON = require('JSON');
