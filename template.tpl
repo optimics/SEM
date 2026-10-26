@@ -235,7 +235,7 @@ ___TEMPLATE_PARAMETERS___
         "enablingConditions": [
           { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
         ],
-        "help": "Seznam SID cookie value — primary user identifier for S2S. Obtain via window.sznIVA.IS.getIdentity('sid') after loading sul.js, or leave empty to use the cookie fallback below."
+        "help": "Seznam SID cookie value — primary user identifier for S2S. Obtain via window.sznIVA.IS.getIdentity('sid') after loading sul.js, or leave empty to use the cookie fallback below. The value must have the sul.js shape id=…|t=…|te=…|c=<32 characters>; a malformed value is ignored with a warning and the cookie fallback can fill it."
       },
       {
         "type": "TEXT",
@@ -245,7 +245,7 @@ ___TEMPLATE_PARAMETERS___
         "enablingConditions": [
           { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
         ],
-        "help": "Unique user/device ID. Server-side template does not hash this value. If left empty and 'Auto-map sid & udid from request cookies' is on, it is read from the 'udid' cookie (the '<uuid>@<timestamp>' suffix is stripped to the canonical uuid)."
+        "help": "Unique user/device ID. Server-side template does not hash this value. If left empty and 'Auto-map sid & udid from request cookies' is on, it is read from the 'udid' cookie (the '<uuid>@<timestamp>' suffix is stripped to the canonical uuid). The value must be a UUID; a '@<timestamp>' suffix is stripped here too, and a malformed value is ignored with a warning so the cookie fallback can fill it."
       },
       {
         "type": "TEXT",
@@ -372,7 +372,7 @@ ___TEMPLATE_PARAMETERS___
         "checkboxText": "Auto-map sid & udid from request cookies (fallback)",
         "simpleValueType": true,
         "defaultValue": true,
-        "help": "When on, sid and udid are read from the inbound request cookies ('sid', 'udid') as a LOWEST-priority fallback — only when not already provided by the SID/UDID fields, User Data Object, or overrides. The 'udid' cookie's '<uuid>@<timestamp>' suffix is stripped to the canonical uuid. The 'sid' cookie value contains '=' but is read whole. Note: Seznam SID is NEVER taken from GA4 event_data, because GA4's 'sid' query param is the GA4 session id, not the Seznam SID. Requires same-site (first-party) SGTM so cookies reach the server; on Safari the 'sid' cookie may be absent (ITP)."
+        "help": "When on, sid and udid are read from the inbound request cookies ('sid', 'udid') as a LOWEST-priority fallback — only when not already provided by the SID/UDID fields, User Data Object, or overrides, or when the provided value is malformed. Explicit and cookie values pass the same shape check. The 'udid' cookie's '<uuid>@<timestamp>' suffix is stripped to the canonical uuid. The 'sid' cookie value contains '=' but is read whole. Note: Seznam SID is NEVER taken from GA4 event_data, because GA4's 'sid' query param is the GA4 session id, not the Seznam SID. Requires same-site (first-party) SGTM so cookies reach the server; on Safari the 'sid' cookie may be absent (ITP)."
       }
     ]
   },
@@ -954,6 +954,8 @@ if (inputError) {
 // Assemble all input layers, normalize the result once, then validate that final payload.
 // The sznaiid cookie write is only planned here; it happens after validation succeeds.
 const sznaiid = planSznaiid(inboundEvent);
+// Source of sid / udid in the payload ('tag', 'cookie' or 'missing'), filled by buildUserData().
+const identity = { sid: 'missing', udid: 'missing' };
 const payload = buildPayload(data, parsed, consent, sznaiid.value);
 const validationError = validate(payload);
 if (validationError) {
@@ -1581,32 +1583,59 @@ function buildUserData(data, parsedUserDataObject) {
       warn('user_data.' + key + ' is not a Seznam field, dropping');
       continue;
     }
+    if (key === 'sid' || key === 'udid') continue;
     setNormalized(userData, key, 'id', merged[key], 'user_data.' + key);
   }
 
-  // Layer 4: cookie fallback for sid / udid (LOWEST priority — only fills gaps).
-  // Explicit-false check: defaultValue=true may not hydrate into existing instances on
-  // template upgrade, so treat undefined as ON.
-  // - The 'sid' cookie value contains '=' (id=...|...|c=...); getCookieValues splits on the
-  //   first '=' only, so the full SID string is returned intact.
-  // - The 'udid' cookie carries a '<uuid>@<timestamp>' suffix (set by sul.js); only the uuid
-  //   part is the canonical udid sent S2S (matches sem.js cookie-read behaviour).
-  // - Seznam SID is NEVER read from GA4 event_data: GA4's 'sid' query param is the GA4 session
-  //   id, not the Seznam SID. Cookie 'sid' is the only auto-source here.
-  if (data.autoMapIdsFromCookies !== false) {
-    if (!userData.sid) {
-      var cookieSid = getFirstCookie('sid');
-      if (cookieSid && isValidSid(cookieSid)) userData.sid = cookieSid;
-      else if (cookieSid) logToConsole('Seznam SEM [WARN]: ignoring malformed sid cookie | trace=' + traceId);
-    }
-    if (!userData.udid) {
-      var cookieUdid = normalizeUdid(getFirstCookie('udid'));
-      if (cookieUdid && isValidUdid(cookieUdid)) userData.udid = cookieUdid;
-      else if (cookieUdid) logToConsole('Seznam SEM [WARN]: ignoring malformed udid cookie | trace=' + traceId);
-    }
+  // Layer 4: sid / udid, with the request cookies as the LOWEST-priority source.
+  identity.sid = resolveIdentity(userData, 'sid', merged.sid);
+  identity.udid = resolveIdentity(userData, 'udid', merged.udid);
+  if (identity.sid === 'missing') {
+    warn('no valid sid (tag fields, User Data Object, overrides or sid cookie); ' +
+      'Seznam can match this hit only on the other identifiers');
   }
 
   return userData;
+}
+
+// sid and udid follow one shape rule whatever their source. The explicit value (object, field or
+// override) is checked first; a malformed one is dropped with a WARN, so a valid request cookie
+// can still fill the gap. Sets userData[name] and returns the source: 'tag', 'cookie' or 'missing'.
+// Cookie fallback notes:
+// - Explicit-false check: defaultValue=true may not hydrate into existing instances on
+//   template upgrade, so treat undefined as ON.
+// - The 'sid' cookie value contains '=' (id=...|...|c=...); getCookieValues splits on the
+//   first '=' only, so the full SID string is returned intact.
+// - The 'udid' cookie carries a '<uuid>@<timestamp>' suffix (set by sul.js); only the uuid
+//   part is the canonical udid sent S2S (matches sem.js cookie-read behaviour). The same
+//   normalization applies to an explicit udid.
+// - Seznam SID is NEVER read from GA4 event_data: GA4's 'sid' query param is the GA4 session
+//   id, not the Seznam SID. Cookie 'sid' is the only auto-source here.
+function resolveIdentity(userData, name, explicitValue) {
+  var explicit = isMissing(explicitValue) ? undefined : normalizeValue('id', explicitValue, 'user_data.' + name);
+  if (explicit !== undefined && name === 'udid') explicit = normalizeUdid(explicit);
+  if (explicit !== undefined) {
+    if (isValidIdentity(name, explicit)) {
+      userData[name] = explicit;
+      return 'tag';
+    }
+    warn('ignoring malformed ' + name + ' from the tag configuration');
+  }
+
+  if (data.autoMapIdsFromCookies !== false) {
+    var cookieValue = getFirstCookie(name);
+    if (name === 'udid') cookieValue = normalizeUdid(cookieValue);
+    if (cookieValue && isValidIdentity(name, cookieValue)) {
+      userData[name] = cookieValue;
+      return 'cookie';
+    }
+    if (cookieValue) warn('ignoring malformed ' + name + ' cookie');
+  }
+  return 'missing';
+}
+
+function isValidIdentity(name, value) {
+  return name === 'sid' ? isValidSid(value) : isValidUdid(value);
 }
 
 function buildEventData(data, parsed, sznaiidValue) {
@@ -1907,10 +1936,9 @@ function normalizeUdid(v) {
   return parts[0] || v;
 }
 
-// Cookie values are user-controllable, so the cookie fallback validates shape before
-// forwarding. Structural checks only, using sandbox-proven primitives (split / indexOf /
-// length) — NO per-char access (charAt/charCodeAt/index). Charset enforcement is left to
-// the Seznam server, consistent with isValidSemId.
+// Cookie values are user-controllable and explicit values can be mis-mapped, so sid/udid from
+// every source are shape-checked before forwarding. Structural checks only (split / indexOf /
+// length); the charset is left to the Seznam server.
 
 // UUID shape via segment lengths: 8-4-4-4-12.
 function isValidUdid(v) {
