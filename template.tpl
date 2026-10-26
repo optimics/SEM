@@ -142,7 +142,7 @@ ___TEMPLATE_PARAMETERS___
         "checkboxText": "Enable GA4 auto-map",
         "simpleValueType": true,
         "defaultValue": false,
-        "help": "Reads inbound GA4 event and pre-fills SEM event_data, contents, event_url, event_id, and hashed sha256_* user_data only. Raw PII (email/phone/name/address) is never auto-forwarded — the template does not hash. Explicit fields below always override (Layer 0 precedence). Off by default to preserve v2.0 GA4 decoupling."
+        "help": "Reads inbound GA4 event and pre-fills SEM event_data, contents, event_url, event_id, and hashed sha256_* user_data only. Raw PII (email/phone/name/address) is never auto-forwarded — the template does not hash. Explicit fields below always override (Layer 0 precedence). Consent is not auto-mapped: map the Consent Mode Object on this tag too. Off by default to preserve v2.0 GA4 decoupling."
       },
       {
         "type": "CHECKBOX",
@@ -187,7 +187,7 @@ ___TEMPLATE_PARAMETERS___
         "name": "consentModeObject",
         "displayName": "Consent Mode Object (optional)",
         "simpleValueType": true,
-        "help": "A GTM variable resolving to a consent_mode object, or a JSON string of one. Supported keys: ad_storage, ad_user_data, ad_personalization, functionality_storage, analytics_storage. Accepted values: 'granted'/'denied', true/false, 1/0 and '1'/'0'/'true'/'false'; they are sent as 'granted'/'denied'. Supported keys are forwarded as present and missing keys are not filled. Other keys (e.g. wait_for_update) are ignored. A null value counts as missing: that key is omitted with a warning. If the variable is set but malformed (not an object, no supported key, or an invalid value such as 'Granted', 'yes' or 2 on a supported key), the tag fails with an ERROR and sends nothing."
+        "help": "A GTM variable resolving to a consent_mode object, or a JSON string of one. Supported keys: ad_storage, ad_user_data, ad_personalization, functionality_storage, analytics_storage. Accepted values: 'granted'/'denied', true/false, 1/0 and '1'/'0'/'true'/'false' (surrounding spaces are ignored, letter case is not); they are sent as 'granted'/'denied'. Map this field on every SEM tag, including GA4 Auto-Map tags: auto-map does not derive consent. Supported keys are forwarded as present and missing keys are not filled. Other keys (e.g. wait_for_update) are ignored. A null value counts as missing: that key is omitted with a warning. If the variable is set but malformed (not an object, no supported key, or an invalid value such as 'Granted', 'yes' or 2 on a supported key), the tag fails with an ERROR and sends nothing."
       },
       {
         "type": "TEXT",
