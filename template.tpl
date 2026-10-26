@@ -3029,7 +3029,7 @@ scenarios:
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     mock('getAllEventData', () => ({ page_location: 'https://shop.example/lp?sznaiid=NEWVAL' }));
     mock('getCookieValues', () => []);
-    mock('setCookie', (name, value, options) => { capturedCookieWrite = { name, value, options }; });
+    mock('setCookie', (name, value, options) => { capturedCookieWrite = { name: name, value: value, options: options }; });
     runCode({
       eventNameSelect: 'PageView',
       semId: 'abcdefghijklmnopqrstuvwx',
@@ -3067,7 +3067,7 @@ scenarios:
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     mock('getAllEventData', () => ({ page_location: 'https://shop.example/lp?sznaiid=NEWVAL' }));
     mock('getCookieValues', (name) => name === 'sznaiid' ? ['EXISTING'] : []);
-    mock('setCookie', (name, value, options) => { capturedCookieWrite = { name, value, options }; });
+    mock('setCookie', (name, value, options) => { capturedCookieWrite = { name: name, value: value, options: options }; });
     runCode({
       eventNameSelect: 'PageView',
       semId: 'abcdefghijklmnopqrstuvwx',
