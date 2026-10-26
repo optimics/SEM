@@ -187,14 +187,14 @@ ___TEMPLATE_PARAMETERS___
         "name": "consentModeObject",
         "displayName": "Consent Mode Object (optional)",
         "simpleValueType": true,
-        "help": "A GTM variable resolving to a consent_mode object. Supported keys: ad_storage, ad_user_data, ad_personalization, functionality_storage, analytics_storage. Unsupported keys are automatically stripped. Boolean values (true/false) are normalized to 'granted'/'denied'."
+        "help": "A GTM variable resolving to a consent_mode object, or a JSON string of one. Supported keys: ad_storage, ad_user_data, ad_personalization, functionality_storage, analytics_storage. Accepted values: 'granted'/'denied', true/false, 1/0 and '1'/'0'/'true'/'false'; they are sent as 'granted'/'denied'. Supported keys are forwarded as present and missing keys are not filled. Other keys (e.g. wait_for_update) are ignored. If the variable is set but malformed (not an object, no supported key, or an invalid value such as 'Granted', 'yes' or null on a supported key), the tag fails with an ERROR and sends nothing."
       },
       {
         "type": "TEXT",
         "name": "consentString",
         "displayName": "Consent String (IAB TCF)",
         "simpleValueType": true,
-        "help": "IAB TCF consent string from your CMP, if available."
+        "help": "IAB TCF v2 consent string from your CMP. Seznam evaluates the TCF string in preference to consent_mode, so leave this empty unless your CMP is IAB TCF v2 and lists Seznam as a vendor. The template checks the syntax only (starts with C; letters, digits, _ . -); a value that fails the check fails the tag with an ERROR. Empty values and the strings 'undefined'/'null' count as absent."
       }
     ]
   },
@@ -621,7 +621,7 @@ ___TEMPLATE_PARAMETERS___
         "checkboxText": "Strict Event Validation",
         "simpleValueType": true,
         "defaultValue": false,
-        "help": "When enabled, unknown event names and invalid JSON in object/array fields cause the tag to fail (and call gtmOnFailure) instead of just logging. Recommended for production hardening. When disabled, such issues are logged but the tag reports success."
+        "help": "When enabled, unknown event names and invalid JSON in object/array fields cause the tag to fail (and call gtmOnFailure) instead of just logging. Recommended for production hardening. When disabled, such issues are logged but the tag reports success. A malformed consent configuration always fails the tag, regardless of this setting."
       },
       {
         "type": "CHECKBOX",
@@ -847,6 +847,15 @@ const USER_DATA_KEYS = [
 const TRUE_VALUES = [true, 1, '1', 'true'];
 const FALSE_VALUES = [false, 0, '0', 'false'];
 
+// consent_mode keys in sem-hit-json-schema-v2.json (each 'granted' | 'denied').
+const CONSENT_KEYS = [
+  'ad_storage', 'ad_user_data', 'ad_personalization',
+  'functionality_storage', 'analytics_storage'
+];
+
+// Characters of an IAB TCF v2 string: base64url segments joined by '.'.
+const TCF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-';
+
 // Maps FE-template alias keys → canonical SEM wire keys.
 // Use an ordered ARRAY (not an object) because order matters when multiple
 // aliases resolve to the same canonical (e.g. gender vs g): the entry listed
@@ -928,14 +937,15 @@ const TEMPLATE_VERSION = '2.2.1';
 
 // Parse JSON object/array fields once, up-front. `checkJsonInputs` decides severity, `buildPayload` consumes values.
 const parsed = {
-  consent:    parseJsonObjectField('consentModeObject', data.consentModeObject),
   userData:   parseJsonObjectField('userDataObject',    data.userDataObject),
   eventData:  parseJsonObjectField('eventDataObject',   data.eventDataObject),
   contents:   parseJsonArray('contents',   data.contents),
   productIds: parseJsonArray('productIds', data.productIds)
 };
 
-const inputError = checkJsonInputs(data, parsed);
+// A malformed configured consent input fails the tag before anything is assembled.
+const consent = resolveConsent(data.consentModeObject, data.consentString);
+const inputError = consent.error || checkJsonInputs(data, parsed);
 if (inputError) {
   failTag(inputError);
   return;
@@ -944,7 +954,7 @@ if (inputError) {
 // Assemble all input layers, normalize the result once, then validate that final payload.
 // The sznaiid cookie write is only planned here; it happens after validation succeeds.
 const sznaiid = planSznaiid(inboundEvent);
-const payload = buildPayload(data, parsed, sznaiid.value);
+const payload = buildPayload(data, parsed, consent, sznaiid.value);
 const validationError = validate(payload);
 if (validationError) {
   failTag(validationError + ' | event=' + resolvedEventName + ' | trace=' + traceId);
@@ -1019,11 +1029,8 @@ if (data.useOptimisticScenario) {
  ******************************************************************************/
 
 // Malformed JSON in the object/array fields fails the tag under Strict Event Validation and is
-// logged as an ERROR otherwise. Consent stays a WARN (optional field).
+// logged as an ERROR otherwise.
 function checkJsonInputs(data, parsed) {
-  if (parsed.consent.error) {
-    logToConsole('Seznam SEM [WARN]: ' + parsed.consent.error + ' | trace=' + traceId);
-  }
   var results = [parsed.userData, parsed.eventData, parsed.contents, parsed.productIds];
   for (var i = 0; i < results.length; i++) {
     if (!results[i].error) continue;
@@ -1083,6 +1090,78 @@ function failTag(message) {
   logToConsole('Seznam SEM [ERROR]: ' + message);
   logToBigQuery({ url: apiUrl }, { body: message });
   data.gtmOnFailure();
+}
+
+/*******************************************************************************
+ * Consent
+ ******************************************************************************/
+
+// Validates and normalizes the configured consent inputs. Returns { mode, string, error }.
+// - consent_mode: an object or a JSON object string. Supported keys take granted/denied or
+//   true/false, 1/0 (also as strings) and are forwarded as present; missing keys are never
+//   filled. Other keys (e.g. wait_for_update) are ignored.
+// - consent_string: forwarded when it passes a syntax check for IAB TCF v2 (first character C,
+//   only A-Z a-z 0-9 _ . -). The check is a heuristic, not proof of a valid TCF string.
+// Missing inputs (undefined, null, '', 'undefined', 'null') are optional. A malformed object, an
+// invalid value on a supported key (including null) or a failed TCF check is a configuration
+// error and fails the tag: Seznam prefers TCF over consent_mode, so dropping or replacing
+// one of them would send a consent signal the advertiser did not configure.
+// Error messages name the field and the received type, never the value.
+function resolveConsent(rawMode, rawString) {
+  var result = { mode: {}, string: undefined, error: undefined };
+
+  if (!isMissing(rawMode) && !isPlaceholder(rawMode)) {
+    var obj = getType(rawMode) === 'string' ? JSON.parse(rawMode) : rawMode;
+    if (getType(obj) !== 'object') {
+      result.error = 'consentModeObject: expected object with granted/denied values, got ' + getType(rawMode);
+      return result;
+    }
+    var keyCount = 0;
+    var consentKeyCount = 0;
+    for (var key in obj) {
+      if (!obj.hasOwnProperty(key)) continue;
+      keyCount++;
+      if (contains(CONSENT_KEYS, key)) consentKeyCount++;
+    }
+    if (keyCount > 0 && consentKeyCount === 0) {
+      result.error = 'consentModeObject: no supported consent key (' + CONSENT_KEYS.join(', ') + '), got object';
+      return result;
+    }
+    for (var i = 0; i < CONSENT_KEYS.length; i++) {
+      var name = CONSENT_KEYS[i];
+      var v = obj[name];
+      if (!obj.hasOwnProperty(name) || v === undefined || (getType(v) === 'string' && (v.trim() === '' || isPlaceholder(v)))) continue;
+      var state = (v === 'granted' || v === 'denied') ? v : undefined;
+      var bool = toBoolean(v);
+      if (bool !== undefined) state = bool ? 'granted' : 'denied';
+      if (!state) {
+        result.error = 'consentModeObject.' + name + ': expected granted/denied (or true/false, 1/0), got ' + getType(v);
+        return result;
+      }
+      result.mode[name] = state;
+    }
+  }
+
+  if (!isMissing(rawString) && !isPlaceholder(rawString)) {
+    if (getType(rawString) !== 'string' || !isTcfString(rawString.trim())) {
+      result.error = 'consentString: expected IAB TCF v2 string (starts with C; letters, digits, _ . -), got ' + getType(rawString);
+      return result;
+    }
+    result.string = rawString.trim();
+  }
+
+  if (!hasProperties(result.mode) && !result.string) {
+    warn('no consent signal (Consent Mode Object and Consent String are empty); Seznam receives the hit without consent information');
+  }
+  return result;
+}
+
+function isTcfString(s) {
+  if (s.charAt(0) !== 'C') return false;
+  for (var i = 1; i < s.length; i++) {
+    if (TCF_CHARS.indexOf(s.charAt(i)) === -1) return false;
+  }
+  return true;
 }
 
 /*******************************************************************************
@@ -1327,7 +1406,7 @@ function writeSznaiidCookie(value) {
  * Payload builders
  ******************************************************************************/
 
-function buildPayload(data, parsed, sznaiidValue) {
+function buildPayload(data, parsed, consent, sznaiidValue) {
   var eventTime = normalizeEventTime(data.eventTime);
   var eventUrl = data.eventUrl || ga4.eventUrl || getRequestHeader('referer') || '';
 
@@ -1356,12 +1435,11 @@ function buildPayload(data, parsed, sznaiidValue) {
 
   setNormalized(payload, 'event_id', 'id', isMissing(data.eventId) ? ga4.eventId : data.eventId, 'event_id');
 
-  var consentMode = buildConsentMode(parsed.consent.value);
-  if (hasProperties(consentMode)) {
-    payload.consent_mode = consentMode;
+  if (hasProperties(consent.mode)) {
+    payload.consent_mode = consent.mode;
   }
 
-  addIfPresent(payload, 'consent_string', data.consentString);
+  addIfPresent(payload, 'consent_string', consent.string);
 
   var userData = buildUserData(data, parsed.userData.value);
   if (hasProperties(userData)) {
@@ -1373,8 +1451,8 @@ function buildPayload(data, parsed, sznaiidValue) {
   }
 
   if (data.sendS2sHeaders &&
-      consentMode.ad_storage === 'granted' &&
-      consentMode.ad_user_data === 'granted') {
+      consent.mode.ad_storage === 'granted' &&
+      consent.mode.ad_user_data === 'granted') {
     var s2sHeaders = buildS2sHeaders();
     if (hasProperties(s2sHeaders)) {
       payload.s2s_headers = s2sHeaders;
@@ -1398,28 +1476,6 @@ function normalizeEventTime(rawValue) {
     return getTimestampMillis();
   }
   return ms;
-}
-
-function buildConsentMode(parsedConsent) {
-  var ALLOWED_CONSENT_KEYS = [
-    'ad_storage', 'ad_user_data', 'ad_personalization',
-    'functionality_storage', 'analytics_storage'
-  ];
-
-  var raw = parsedConsent || {};
-
-  // Keep only supported keys and normalize booleans
-  var consent = {};
-  for (var i = 0; i < ALLOWED_CONSENT_KEYS.length; i++) {
-    var key = ALLOWED_CONSENT_KEYS[i];
-    if (raw.hasOwnProperty(key)) {
-      var val = raw[key];
-      if (val === true) val = 'granted';
-      else if (val === false) val = 'denied';
-      consent[key] = val;
-    }
-  }
-  return consent;
 }
 
 function buildS2sHeaders() {
