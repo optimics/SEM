@@ -783,6 +783,7 @@ ___SANDBOXED_JS_FOR_SERVER___
 
 const JSON = require('JSON');
 const Math = require('Math');
+const objectApi = require('Object');
 const BigQuery = require('BigQuery');
 const sendHttpRequest = require('sendHttpRequest');
 const getTimestampMillis = require('getTimestampMillis');
@@ -794,6 +795,14 @@ const getAllEventData = require('getAllEventData');
 const setCookie = require('setCookie');
 const getCookieValues = require('getCookieValues');
 const parseUrl = require('parseUrl');
+const getContainerVersion = require('getContainerVersion');
+
+/*******************************************************************************
+ * Constants
+ ******************************************************************************/
+
+// Every constant is declared before the main flow: the GTM sandbox hoists `const` declarations
+// var-style (initialized to undefined), so a constant declared below the flow would be undefined there.
 
 const ALLOWED_EVENTS = [
   'PageView', 'ViewContent', 'Purchase', 'Contact',
@@ -802,6 +811,34 @@ const ALLOWED_EVENTS = [
   'CustomizeProduct', 'Donate', 'FindLocation', 'Schedule',
   'StartTrial', 'SubmitApplication'
 ];
+
+// GA4 event_name → Seznam event name, one-to-one only. Used whenever Event Name is 'Auto from GA4',
+// whether or not GA4 prefill is on; any other GA4 event fails the tag.
+const GA4_EVENT_NAME_MAP = {
+  page_view: 'PageView',
+  view_item: 'ViewContent',
+  search: 'Search',
+  view_search_results: 'Search',
+  add_to_cart: 'AddToCart',
+  add_to_wishlist: 'AddToWishlist',
+  begin_checkout: 'InitiateCheckout',
+  add_payment_info: 'AddPaymentInfo',
+  purchase: 'Purchase',
+  generate_lead: 'Lead',
+  sign_up: 'CompleteRegistration',
+  subscribe: 'Subscribe',
+  contact: 'Contact'
+};
+
+// GA4 keys prefilled 1:1. order_id, value and the items have candidate chains (extractGa4).
+const GA4_EVENT_DATA_MAP = {
+  currency: 'currency',
+  tax: 'value_tax',
+  shipping: 'delivery_price',
+  payment_type: 'payment_type',
+  shipping_tier: 'delivery_type',
+  search_term: 'search_string'
+};
 
 // Wire type of every event_data key in rtgconv.json; the normalization pass converts each value to it.
 // 'id' = non-empty string (finite numbers are converted, the placeholders 'undefined'/'null' are invalid),
@@ -830,13 +867,6 @@ const EVENT_DATA_TYPES = {
   contents: 'contents'
 };
 
-// content_type values in rtgconv.json.
-const CONTENT_TYPES = ['page', 'product', 'product_group', 'search'];
-
-// Free text: the words 'undefined' and 'null' are kept literally here; in every other key
-// they are placeholders from a broken variable mapping and count as not supplied (R8).
-const FREE_TEXT_KEYS = ['search_string', 'content_name', 'content_category'];
-
 const CONTENT_ITEM_TYPES = {
   id: 'id',
   quantity: 'quantity',
@@ -845,15 +875,18 @@ const CONTENT_ITEM_TYPES = {
   content_category: 'text'
 };
 
+// content_type values in rtgconv.json.
+const CONTENT_TYPES = ['page', 'product', 'product_group', 'search'];
+
 // user_data keys in sem-hit-json-schema-v2.json; every value is a string.
 const USER_DATA_KEYS = [
   'em', 'ph', 'fn', 'ln', 'ge', 'db', 'ct', 'region', 'zp', 'sr',
   'country', 'said', 'id5', 'secid', 'subscription_id', 'sid', 'udid'
 ];
 
-// Booleans and the encodings data layers and CMPs commonly use for them.
-const TRUE_VALUES = [true, 1, '1', 'true'];
-const FALSE_VALUES = [false, 0, '0', 'false'];
+// Free text: the words 'undefined' and 'null' are kept literally here; in every other key
+// they are placeholders from a broken variable mapping and count as not supplied (R8).
+const FREE_TEXT_KEYS = ['search_string', 'content_name', 'content_category'];
 
 // consent_mode keys in sem-hit-json-schema-v2.json (each 'granted' | 'denied').
 const CONSENT_KEYS = [
@@ -861,20 +894,18 @@ const CONSENT_KEYS = [
   'functionality_storage', 'analytics_storage'
 ];
 
+// Booleans and the encodings data layers and CMPs commonly use for them.
+const TRUE_VALUES = [true, 1, '1', 'true'];
+const FALSE_VALUES = [false, 0, '0', 'false'];
+
 // Characters of a sem_id (rtgconv.json: ^[0-9a-z]{24}$).
 const SEM_ID_CHARS = '0123456789abcdefghijklmnopqrstuvwxyz';
 
 // Characters of an IAB TCF v2 string: base64url segments joined by '.'.
 const TCF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-';
 
-// Maps FE-template alias keys → canonical SEM wire keys.
-// Use an ordered ARRAY (not an object) because order matters when multiple
-// aliases resolve to the same canonical (e.g. gender vs g): the entry listed
-// FIRST wins. Object iteration order in the GTM sandbox is "should-be-stable"
-// but an explicit array removes the should.
-// MUST be declared before the main execution flow (buildPayload): the GTM sandbox
-// hoists `const` declarations var-style (initialized to undefined), so a const used
-// by buildUserData() would be undefined if declared after the buildPayload() call.
+// Maps FE-template alias keys → canonical SEM wire keys. An ordered array, because order matters
+// when several aliases resolve to the same canonical key (gender vs g): the entry listed first wins.
 const USER_DATA_ALIAS_MAP = [
   { alias: 'email',          canonical: 'em' },
   { alias: 'phone',          canonical: 'ph' },
@@ -890,231 +921,249 @@ const USER_DATA_ALIAS_MAP = [
   { alias: 'subscriptionId', canonical: 'subscription_id' }
 ];
 
-// GA4 → SEM event-name map. Used only when eventNameSelect === 'auto' AND
-// autoMapEventName === true. Unknown GA4 names log a WARN and fall through.
-const GA4_EVENT_NAME_MAP = {
-  page_view: 'PageView',
-  view_item: 'ViewContent',
-  view_item_list: 'ViewContent',
-  select_item: 'ViewContent',
-  view_promotion: 'ViewContent',
-  search: 'Search',
-  view_search_results: 'Search',
-  add_to_cart: 'AddToCart',
-  add_to_wishlist: 'AddToWishlist',
-  begin_checkout: 'InitiateCheckout',
-  add_payment_info: 'AddPaymentInfo',
-  add_shipping_info: 'AddPaymentInfo',
-  purchase: 'Purchase',
-  generate_lead: 'Lead',
-  sign_up: 'CompleteRegistration',
-  login: 'CompleteRegistration',
-  contact: 'Contact',
-  subscribe: 'Subscribe'
-};
+// The v2.x individual fields of the legacy group and their wire keys, in the order v2.3 applied
+// them, so the merged keys and the serialized payload keep the v2.3 order.
+const LEGACY_USER_FIELDS = [
+  { param: 'sid',                key: 'sid' },
+  { param: 'userEmail',          key: 'em' },
+  { param: 'userPhone',          key: 'ph' },
+  { param: 'userFirstName',      key: 'fn' },
+  { param: 'userLastName',       key: 'ln' },
+  { param: 'userGender',         key: 'ge' },
+  { param: 'userDob',            key: 'db' },
+  { param: 'userCity',           key: 'ct' },
+  { param: 'userRegion',         key: 'region' },
+  { param: 'userZip',            key: 'zp' },
+  { param: 'userStreet',         key: 'sr' },
+  { param: 'userCountry',        key: 'country' },
+  { param: 'userSubscriptionId', key: 'subscription_id' },
+  { param: 'userUdid',           key: 'udid' }
+];
 
-// Static 1:1 map for fields without multi-source aliases.
-// `value` and `transaction_id` are handled by multi-source extractors below
-// (value: value/revenue/totalWithoutVat; order_id: transaction_id/id/orderNo).
-const GA4_EVENT_DATA_MAP = {
-  currency: 'currency',
-  tax: 'value_tax',
-  shipping: 'delivery_price',
-  payment_type: 'payment_type',
-  shipping_tier: 'delivery_type',
-  search_term: 'search_string'
-};
+const LEGACY_EVENT_FIELDS = [
+  { param: 'sznaiid',        key: 'sznaiid' },
+  { param: 'currency',       key: 'currency' },
+  { param: 'value',          key: 'value' },
+  { param: 'valueTax',       key: 'value_tax' },
+  { param: 'orderId',        key: 'order_id' },
+  { param: 'contentType',    key: 'content_type' },
+  { param: 'deliveryPrice',  key: 'delivery_price' },
+  { param: 'deliveryType',   key: 'delivery_type' },
+  { param: 'paymentType',    key: 'payment_type' },
+  { param: 'otherCosts',     key: 'other_costs' },
+  { param: 'predictedLtv',   key: 'predicted_ltv' },
+  { param: 'goodsIntention', key: 'goods_intention' },
+  { param: 'goodsPhase',     key: 'goods_phase' },
+  { param: 'searchString',   key: 'search_string' },
+  { param: 'reviewEmail',    key: 'review_email' },
+  { param: 'productIds',     key: 'product_ids' },
+  { param: 'contents',       key: 'contents' }
+];
 
-const traceId = getRequestHeader('trace-id');
+// Order of the item groups in the aggregated legacy WARN (flushLegacyUse).
+const LEGACY_GROUPS = ['user', 'event', 'override', 'alias', 'ga4', 'setting'];
 
-// The inbound event is read once; GA4 Auto-Map and the sznaiid URL lookup share it.
-const inboundEvent = getAllEventData();
-
-// Auto-map: gather GA4-derived values once at top-level. Returns a `blank` shape when
-// enableGa4AutoMap=false, so downstream code can always read ga4.* without null-checks.
-const ga4 = extractFromEventData(data, inboundEvent);
-
-const resolvedEventName = data.eventNameSelect === 'from_variable'
-  ? data.eventNameFromVariable
-  : (data.eventNameSelect === 'auto' ? ga4.resolvedEventName : data.eventNameSelect);
-
-const apiUrl = 'https://sem.seznam.cz/rtgconv';
+const API_URL = 'https://sem.seznam.cz/rtgconv';
 
 // Seznam telemetry: `api.version` tracks the integration client version (bump on contract/behavior changes).
 // `api.template_version` tracks our CHANGELOG release version. These are independent of the
 // GTM ___INFO___.version field, which is a GTM-internal stability flag constrained to 0 or 1.
 const API_CLIENT_VERSION = '1';
-const TEMPLATE_VERSION = '2.3.1';
+const TEMPLATE_VERSION = '3.0.0';
 
-// Parse JSON object/array fields once, up-front. `checkJsonInputs` decides severity, `buildPayload` consumes values.
-const parsed = {
-  userData:   parseJsonObjectField('userDataObject',    data.userDataObject),
-  eventData:  parseJsonObjectField('eventDataObject',   data.eventDataObject),
-  contents:   parseJsonArray('contents',   data.contents),
-  productIds: parseJsonArray('productIds', data.productIds)
-};
+// Seznam recommends a 3-5 s timeout (s2s.html); the sendHttpRequest default is 15 s.
+const TIMEOUT_MS = 5000;
+
+// sznaiid cookie lifetime: 30 days, the approximation of the one calendar month sem.js uses.
+const SZNAIID_MAX_AGE = 2592000;
+
+/*******************************************************************************
+ * Main flow
+ ******************************************************************************/
+
+const traceId = getRequestHeader('trace-id');
+// Legacy v2.x items in active use. Created first, because resolveLogLevel() may record testMode;
+// reported once per execution by flushLegacyUse(), also on failure (failTag).
+const legacyUsed = [];
+const logLevel = resolveLogLevel();
+
+// The inbound event is read once; GA4 prefill, the GA4 event name, sznaiid and IP/User-Agent share it.
+const inboundEvent = getAllEventData();
+const ga4 = extractGa4(data, inboundEvent);
+const eventName = resolveEventName(data, inboundEvent);
+const parsed = parseInputFields(data);
 
 // A malformed configured consent input fails the tag before anything is assembled.
 const consent = resolveConsent(data.consentModeObject, data.consentString);
-const inputError = consent.error || checkJsonInputs(data, parsed);
-if (inputError) {
-  failTag(inputError);
-  return;
-}
+if (consent.error) return failTag(consent.error);
 
 // Assemble all input layers, normalize the result once, then validate that final payload.
 // The sznaiid cookie write is only planned here; it happens after validation succeeds.
 const sznaiid = planSznaiid(inboundEvent);
 // Source of sid / udid in the payload ('tag', 'cookie' or 'missing'), filled by buildUserData().
 const identity = { sid: 'missing', udid: 'missing' };
-const payload = buildPayload(data, parsed, consent, sznaiid.value);
+const payload = buildPayload(eventName, ga4, parsed, consent, sznaiid.value, identity);
 const validationError = validate(payload);
-if (validationError) {
-  failTag(validationError + ' | event=' + resolvedEventName + ' | trace=' + traceId);
-  return;
+if (validationError) return failTag(validationError);
+
+if (sznaiid.writeCookie) writeSznaiidCookie(sznaiid.value);
+flushLegacyUse();
+logDiagnostics(payload, consent, identity, inboundEvent);
+send(payload);
+
+/*******************************************************************************
+ * Logging
+ ******************************************************************************/
+
+// Console logging level: 'no', 'debug' (Preview and debug mode only) or 'always'. A legacy Test
+// Mode that is still checked forces 'always', whatever logType holds.
+function resolveLogLevel() {
+  if (data.testMode === true) {
+    noteLegacy('setting', 'testMode');
+    return 'always';
+  }
+  return (data.logType === 'no' || data.logType === 'always') ? data.logType : 'debug';
 }
 
-if (sznaiid.writeCookie) {
-  writeSznaiidCookie(sznaiid.value);
+// WARN lines and the request/response diagnostics follow the level. 'debug' logs only while the
+// container runs in Preview or debug mode; an unavailable container version counts as production.
+function shouldLog() {
+  if (logLevel !== 'debug') return logLevel === 'always';
+  var version = getContainerVersion();
+  return getType(version) === 'object' && (version.debugMode === true || version.previewMode === true);
 }
 
-// Test Mode diagnostics: the consent summary, the raw GA4 x-ga-gcs value (logged only,
-// never decoded into the payload) and the source of sid / udid, next to the payload.
-log({
-  Name: 'Seznam SEM',
-  Type: 'Request',
-  TraceId: traceId,
-  EventName: resolvedEventName,
-  RequestMethod: 'POST',
-  RequestUrl: apiUrl,
-  Consent: {
-    consent_mode: payload.consent_mode || 'absent',
-    consent_string: payload.consent_string ? 'present' : 'absent',
-    s2s_headers: payload.s2s_headers ? 'sent' : 'not sent',
-    x_ga_gcs: getType(inboundEvent) === 'object' ? inboundEvent['x-ga-gcs'] : undefined
-  },
-  Identity: identity,
-  RequestBody: payload
-});
+function warn(message) {
+  if (shouldLog()) logToConsole('Seznam SEM [WARN]: ' + message + ' | trace=' + traceId);
+}
 
-// Seznam recommends a 3-5 s timeout (s2s.html); the sendHttpRequest default is 15 s.
-sendHttpRequest(
-  apiUrl,
-  {
-    headers: {
-      'content-type': 'application/json',
-      'X-Client-Id': 'gtm-server-template-seznam-sem',
-      'X-Client-Version': TEMPLATE_VERSION
-    },
-    method: 'POST',
-    timeout: 5000
-  },
-  JSON.stringify(payload)
-).then(function(result) {
-  log({
-    Name: 'Seznam SEM',
-    Type: 'Response',
-    TraceId: traceId,
-    EventName: resolvedEventName,
-    ResponseStatusCode: result.statusCode,
-    ResponseHeaders: result.headers,
-    ResponseBody: result.body
-  });
+// ERROR lines are always logged; the callers add the context.
+function error(message) {
+  logToConsole('Seznam SEM [ERROR]: ' + message);
+}
 
-  logToBigQuery(
-    { url: apiUrl, body: payload },
-    { statusCode: result.statusCode, headers: result.headers, body: result.body }
-  );
+// Records a legacy item in active use (`group` is one of LEGACY_GROUPS). Names only, never values.
+function noteLegacy(group, name) {
+  for (var i = 0; i < legacyUsed.length; i++) {
+    if (legacyUsed[i].name === name) return;
+  }
+  legacyUsed.push({ group: group, name: name });
+}
 
-  if (!data.useOptimisticScenario) {
-    if (result.statusCode >= 200 && result.statusCode < 300) {
-      data.gtmOnSuccess();
-    } else {
-      logHttpError(result);
-      data.gtmOnFailure();
+// The aggregated legacy WARN: one line per execution, logged whatever logType holds, and only
+// when a legacy item is in active use.
+function flushLegacyUse() {
+  var names = [];
+  for (var g = 0; g < LEGACY_GROUPS.length; g++) {
+    for (var i = 0; i < legacyUsed.length; i++) {
+      if (legacyUsed[i].group === LEGACY_GROUPS[g]) names.push(legacyUsed[i].name);
     }
-  } else if (result.statusCode < 200 || result.statusCode >= 300) {
-    logHttpError(result);
   }
-}).catch(function(error) {
-  // sendHttpRequest rejects with { reason: 'failed' | 'timed_out' }.
-  var reason = (error && error.reason) ? error.reason : JSON.stringify(error);
-  logToConsole('Seznam SEM [ERROR]: request to Seznam failed: ' + ('' + reason).substring(0, 200) +
-    ' | event=' + resolvedEventName + ' | trace=' + traceId);
-  logToBigQuery({ url: apiUrl, body: payload });
+  legacyUsed.splice(0, legacyUsed.length);
+  if (names.length === 0) return;
+  logToConsole('Seznam SEM [WARN]: v2.x settings in use: ' + names.join(', ') +
+    '; move them to the v3 tables/settings (README "Přechod na v3") | trace=' + traceId);
+}
 
-  if (!data.useOptimisticScenario) {
-    data.gtmOnFailure();
+// Request diagnostics: the consent summary, the raw GA4 x-ga-gcs value (logged only, never decoded
+// into the payload) and the source of sid / udid, next to the payload.
+function logDiagnostics(payload, consent, identity, ev) {
+  if (!shouldLog()) return;
+  logToConsole(JSON.stringify({
+    Name: 'Seznam SEM',
+    Type: 'Request',
+    TraceId: traceId,
+    EventName: eventName,
+    RequestMethod: 'POST',
+    RequestUrl: API_URL,
+    Consent: {
+      consent_mode: hasProperties(consent.mode) ? consent.mode : 'absent',
+      consent_string: consent.string ? 'present' : 'absent',
+      s2s_headers: payload.s2s_headers ? 'sent' : 'not sent',
+      x_ga_gcs: getType(ev) === 'object' ? ev['x-ga-gcs'] : undefined
+    },
+    Identity: identity,
+    RequestBody: payload
+  }));
+}
+
+/*******************************************************************************
+ * Legacy adapter (v2.x fields in the collapsed group)
+ ******************************************************************************/
+
+// The v2.x individual user fields, one layer above the User Data Object. A supplied field is
+// applied with the layer rule and reported. userState (the runtime-only predecessor of userRegion)
+// applies only while userRegion is unset, so a supplied invalid userRegion stays authoritative.
+function applyLegacyUserFields(merged) {
+  for (var i = 0; i < LEGACY_USER_FIELDS.length; i++) {
+    var param = LEGACY_USER_FIELDS[i].param;
+    var key = LEGACY_USER_FIELDS[i].key;
+    if (param === 'userRegion' && isUnset(data.userRegion)) param = 'userState';
+    if (addLayerValue(merged, 'user_data.', key, data[param])) noteLegacy('user', param + '→user_data.' + key);
   }
-});
+}
 
-if (data.useOptimisticScenario) {
-  data.gtmOnSuccess();
+// The v2.x individual event fields, one layer above the Event Data Object and the sznaiid fallback.
+// Contents and Product IDs stay raw here; a winning JSON string is parsed by the normalization pass.
+function applyLegacyEventFields(merged) {
+  for (var i = 0; i < LEGACY_EVENT_FIELDS.length; i++) {
+    var field = LEGACY_EVENT_FIELDS[i];
+    if (addLayerValue(merged, 'event_data.', field.key, data[field.param])) {
+      noteLegacy('event', field.param + '→event_data.' + field.key);
+    }
+  }
+}
+
+// status: `statusEnabled` distinguishes "not set" from false. Enabled without a value sends false
+// (historic); the value is converted by the same boolean normalizer as the other layers.
+function applyLegacyStatus(merged) {
+  if (data.statusEnabled !== true) return;
+  merged.status = isUnset(data.status) ? false : data.status;
+  noteLegacy('event', 'statusEnabled→event_data.status');
 }
 
 /*******************************************************************************
  * Validation
  ******************************************************************************/
 
-// Malformed JSON in the object/array fields fails the tag under Strict Event Validation and is
-// logged as an ERROR otherwise.
-function checkJsonInputs(data, parsed) {
-  var results = [parsed.userData, parsed.eventData, parsed.contents, parsed.productIds];
-  for (var i = 0; i < results.length; i++) {
-    if (!results[i].error) continue;
-    if (data.strictEventValidation) return results[i].error;
-    logToConsole('Seznam SEM [ERROR]: ' + results[i].error + ' | trace=' + traceId);
-  }
-  return undefined;
-}
-
 // The one validation of the FINAL payload, after every layer has been merged and normalized:
-// event name, sem_id, and the Purchase trio (rtgconv.json requires value, currency, order_id).
-// Returns an error message, or undefined when the payload may be sent.
+// event name, sem_id and the Purchase trio (rtgconv.json requires value, currency, order_id).
+// These checks always stop the hit. Returns the ERROR text, or undefined when the payload may be sent.
 function validate(payload) {
   var ed = payload.event_data;
-  if (!payload.event_name) return 'eventName is required';
-  if (!ed.sem_id) return 'semId is required';
-
-  // sem_id must match ^[0-9a-z]{24}$ (rtgconv.json); fails under Strict, WARN otherwise.
-  if (!isValidSemId(ed.sem_id)) {
-    var semIdMsg = 'semId must be 24 characters of 0-9 and a-z (^[0-9a-z]{24}$)';
-    if (data.strictEventValidation) {
-      return semIdMsg;
-    }
-    warn(semIdMsg + ' | semId=' + ed.sem_id);
-  }
-
-  if (!contains(ALLOWED_EVENTS, payload.event_name)) {
-    var msg = 'Unknown event name: ' + payload.event_name;
-    if (data.strictEventValidation) {
-      return msg;
-    }
-    warn(msg);
-  }
-
-  // After normalization a present order_id/currency is a non-empty string and value a finite
-  // number (0 is valid). `contents` is recommended for retargeting/attribution but not required.
-  if (payload.event_name === 'Purchase') {
+  var problem;
+  if (!payload.event_name) {
+    problem = 'eventName is required';
+  } else if (!ed.sem_id) {
+    problem = 'semId is required';
+  } else if (!isValidSemId(ed.sem_id)) {
+    problem = 'semId must be 24 characters of 0-9 and a-z (^[0-9a-z]{24}$)';
+  } else if (!contains(ALLOWED_EVENTS, payload.event_name)) {
+    problem = 'Unknown event name: ' + payload.event_name;
+  } else if (payload.event_name === 'Purchase') {
+    // After normalization a present order_id/currency is a non-empty string and value a finite
+    // number (0 is valid). `contents` is recommended for retargeting/attribution but not required.
     var missing = [];
     if (ed.order_id === undefined) missing.push('order_id');
     if (ed.currency === undefined) missing.push('currency');
     if (ed.value === undefined) missing.push('value');
     if (missing.length > 0) {
-      return 'Purchase requires: ' + missing.join(', ');
-    }
-    if (ed.contents === undefined) {
+      problem = 'Purchase requires: ' + missing.join(', ');
+    } else if (ed.contents === undefined) {
       warn('Purchase without contents is accepted by the API but strongly recommended for retargeting/attribution');
     }
   }
-
-  return undefined;
+  if (!problem) return undefined;
+  // A stored v2 "Strict Event Validation" off gets a hint; it does not prove that the tag is old.
+  var hint = data.strictEventValidation === false ? ' (v2 loose validation no longer applies)' : '';
+  return problem + ' | event=' + payload.event_name + ' | trace=' + traceId + hint;
 }
 
-// Configuration and validation failures: ERROR log, no request, no cookie write.
+// Configuration and validation failures: ERROR log and the legacy WARN, no request, no cookie write.
 function failTag(message) {
-  logToConsole('Seznam SEM [ERROR]: ' + message);
-  logToBigQuery({ url: apiUrl }, { body: message });
+  error(message);
+  flushLegacyUse();
+  logToBigQuery({ url: API_URL }, { body: message });
   data.gtmOnFailure();
 }
 
@@ -1143,21 +1192,19 @@ function resolveConsent(rawMode, rawString) {
       result.error = 'consentModeObject: expected object with granted/denied values, got ' + getType(rawMode);
       return result;
     }
-    var keyCount = 0;
+    var keys = objectApi.keys(obj);
     var consentKeyCount = 0;
-    for (var key in obj) {
-      if (!obj.hasOwnProperty(key)) continue;
-      keyCount++;
-      if (contains(CONSENT_KEYS, key)) consentKeyCount++;
+    for (var k = 0; k < keys.length; k++) {
+      if (contains(CONSENT_KEYS, keys[k])) consentKeyCount++;
     }
-    if (keyCount > 0 && consentKeyCount === 0) {
+    if (keys.length > 0 && consentKeyCount === 0) {
       result.error = 'consentModeObject: no supported consent key (' + CONSENT_KEYS.join(', ') + '), got object';
       return result;
     }
     for (var i = 0; i < CONSENT_KEYS.length; i++) {
       var name = CONSENT_KEYS[i];
       var v = obj[name];
-      if (!obj.hasOwnProperty(name) || v === undefined || (getType(v) === 'string' && isUnset(v))) continue;
+      if (!contains(keys, name) || v === undefined || (getType(v) === 'string' && isUnset(v))) continue;
       if (v === null) {
         warn('consentModeObject.' + name + ' is null; treating it as missing');
         continue;
@@ -1198,11 +1245,22 @@ function isTcfString(s) {
 }
 
 /*******************************************************************************
- * GA4 Auto-Map (opt-in)
+ * GA4 prefill and event name
  ******************************************************************************/
 
-// FE-parity helper: returns the first usable candidate so fallback candidates can be tried.
-// 'id' / 'text': a non-blank string or a finite number, returned RAW (the normalization pass
+// 'from_variable' → the variable; 'auto' → the 1:1 GA4 map, whether or not GA4 prefill is on;
+// otherwise the selected name. An unmapped GA4 name comes back as 'ga4:<name>', so the "Unknown
+// event name" ERROR names it and it can never match a Seznam event name.
+function resolveEventName(data, ev) {
+  if (data.eventNameSelect === 'from_variable') return data.eventNameFromVariable;
+  if (data.eventNameSelect !== 'auto') return data.eventNameSelect;
+  var ga4Name = getType(ev) === 'object' ? ev.event_name : undefined;
+  if (isMissing(ga4Name)) return undefined;
+  return contains(objectApi.keys(GA4_EVENT_NAME_MAP), ga4Name) ? GA4_EVENT_NAME_MAP[ga4Name] : 'ga4:' + ga4Name;
+}
+
+// FE-parity helper: returns the first usable candidate and its index, so fallback candidates can be
+// tried. 'id' / 'text': a non-blank string or a finite number, returned RAW (the normalization pass
 // converts it); objects, booleans, arrays, NaN/Infinity are skipped, and for 'id' so are the
 // placeholders 'undefined'/'null'. 'number': a canonical finite number.
 function getFirstValue(candidates, targetType) {
@@ -1211,12 +1269,22 @@ function getFirstValue(candidates, targetType) {
     if (isMissing(v)) continue;
     if (targetType === 'number') {
       var num = toNumber(v);
-      if (num !== undefined) return num;
+      if (num !== undefined) return { value: num, index: i };
       continue;
     }
-    if (toText(v, targetType === 'id') !== undefined) return v;
+    if (toText(v, targetType === 'id') !== undefined) return { value: v, index: i };
   }
-  return undefined;
+  return { value: undefined, index: -1 };
+}
+
+// The first usable value of source[keys[i]]. keys[0] is the GA4 key; a later (Shoptet/MeasureHive)
+// key that wins is reported as legacy use under `label` + key.
+function pickGa4(source, keys, targetType, label) {
+  var candidates = [];
+  for (var i = 0; i < keys.length; i++) candidates.push(source[keys[i]]);
+  var picked = getFirstValue(candidates, targetType);
+  if (picked.index > 0) noteLegacy('ga4', label + keys[picked.index]);
+  return picked.value;
 }
 
 // FE-parity helper: round a finite number to 2 decimal places.
@@ -1225,13 +1293,14 @@ function roundTo2(n) {
 }
 
 // Category resolution priority (exclusive, mirrors FE template):
-//   1. `category` (string, possibly slash-separated → MeasureHive)
+//   1. `category` (string, slash-separated → MeasureHive)
 //   2. `currentCategory` || `defaultCategory` (Shoptet)
-//   3. `item_category` ... `item_category5` joined with ' | ' (GA4 EE chain)
-// Returns undefined when no source matches.
+//   3. `item_category` ... `item_category5` joined with ' | ' (GA4)
+// The platform sources are reported as legacy use. Returns undefined when no source matches.
 function buildItemCategory(it) {
   if (it.category && getType(it.category) === 'string') {
     if (it.category.indexOf('/') !== -1) {
+      noteLegacy('ga4', 'ga4.items.category');
       var parts = [];
       var split = it.category.split('/');
       for (var s = 0; s < split.length; s++) if (split[s]) parts.push(split[s]);
@@ -1242,11 +1311,13 @@ function buildItemCategory(it) {
   // Shoptet's currentCategory / defaultCategory can be an array (FE-template parity).
   // Without explicit array handling, '' + ['A','B'] would yield 'A,B' instead of 'A | B'.
   if (it.currentCategory) {
+    noteLegacy('ga4', 'ga4.items.currentCategory');
     return getType(it.currentCategory) === 'array'
       ? it.currentCategory.join(' | ')
       : '' + it.currentCategory;
   }
   if (it.defaultCategory) {
+    noteLegacy('ga4', 'ga4.items.defaultCategory');
     return getType(it.defaultCategory) === 'array'
       ? it.defaultCategory.join(' | ')
       : '' + it.defaultCategory;
@@ -1263,8 +1334,6 @@ function buildItemCategory(it) {
 // SAFETY: only map ALREADY-HASHED sha256_* variants. The template's contract is
 // "we never hash"; raw email/phone/name/address from GA4 would leak unhashed PII
 // over the wire to Seznam, which expects SHA-256-of-normalized inputs.
-// Raw PII auto-mapping is OUT OF SCOPE for v2.2.0 — would require sha256Sync,
-// normalization, and dedicated tests as a separate feature.
 function extractGa4UserData(ev) {
   var out = {};
   var ud = (getType(ev.user_data) === 'object') ? ev.user_data : {};
@@ -1277,63 +1346,54 @@ function extractGa4UserData(ev) {
   if (ud.sha256_phone_number)  out.ph = ud.sha256_phone_number;
   if (addr.sha256_first_name)  out.fn = addr.sha256_first_name;
   if (addr.sha256_last_name)   out.ln = addr.sha256_last_name;
-  // Address fields (city/region/postal/country/street) are also PII per Seznam
-  // schema — they require hashing too. Skip auto-mapping in v2.2.0.
+  // Address fields (city/region/postal/country/street) are PII per the Seznam schema too and are
+  // not prefilled.
   return out;
 }
 
-function extractFromEventData(data, ev) {
-  var blank = { eventData: {}, userData: {}, eventUrl: '', eventId: '', resolvedEventName: '' };
-  if (!data.enableGa4AutoMap) return blank;
-  if (getType(ev) !== 'object') return blank;
+// GA4 prefill (opt-in): the payload layers derived from the inbound GA4 event. Returns empty
+// layers when prefill is off, so callers can always read ga4.*.
+function extractGa4(data, ev) {
+  var out = { eventData: {}, userData: {}, eventUrl: undefined, eventId: undefined };
+  if (!data.enableGa4AutoMap || getType(ev) !== 'object') return out;
 
-  var out = { eventData: {}, userData: {}, eventUrl: '', eventId: '', resolvedEventName: '' };
-
-  // event_url / event_id are always extracted when auto-map is on — they are
-  // top-level payload fields, not gated by the per-section sub-toggles.
-  if (ev.page_location) out.eventUrl = ev.page_location;
-  var ga4EventId = getFirstValue([ev.event_id, ev.transaction_id], 'id');
-  if (ga4EventId !== undefined) out.eventId = ga4EventId;
-
-  if (data.autoMapEventName && ev.event_name) {
-    if (GA4_EVENT_NAME_MAP.hasOwnProperty(ev.event_name)) {
-      out.resolvedEventName = GA4_EVENT_NAME_MAP[ev.event_name];
-    } else {
-      warn('GA4 event ' + ev.event_name + ' has no SEM mapping');
-    }
+  // event_url / event_id are top-level payload fields, extracted whenever prefill is on; the
+  // per-section switches do not gate them. transaction_id is no event_id fallback.
+  out.eventUrl = ev.page_location;
+  out.eventId = pickGa4(ev, ['event_id'], 'id', 'ga4.');
+  if (out.eventId === undefined && isUnset(data.eventId) && !isUnset(ev.transaction_id)) {
+    warn('transaction_id is no longer used as event_id; set Event ID');
   }
 
   // Explicit-false check: defaultValue=true may not hydrate into existing instances
-  // on template upgrade. Treat undefined as default ON when master toggle is enabled.
+  // on template upgrade. Treat undefined as default ON when prefill is enabled.
   if (data.autoMapEventData !== false) {
-    // Static 1:1 fields (currency, tax→value_tax, shipping→delivery_price, etc.)
-    for (var k in GA4_EVENT_DATA_MAP) {
-      if (GA4_EVENT_DATA_MAP.hasOwnProperty(k) && ev.hasOwnProperty(k) && !isMissing(ev[k])) {
-        out.eventData[GA4_EVENT_DATA_MAP[k]] = ev[k];
-      }
+    var keys = objectApi.keys(GA4_EVENT_DATA_MAP);
+    for (var k = 0; k < keys.length; k++) {
+      if (!isMissing(ev[keys[k]])) out.eventData[GA4_EVENT_DATA_MAP[keys[k]]] = ev[keys[k]];
     }
 
     // Multi-source order_id: transaction_id (GA4 standard) || id || orderNo (Shoptet).
-    var effectiveOrderId = getFirstValue([ev.transaction_id, ev.id, ev.orderNo], 'id');
-    if (effectiveOrderId !== undefined) out.eventData.order_id = effectiveOrderId;
+    var orderId = pickGa4(ev, ['transaction_id', 'id', 'orderNo'], 'id', 'ga4.');
+    if (orderId !== undefined) out.eventData.order_id = orderId;
 
-    // items[] → contents, in the GA4 layer: object/field/override contents (even []) replace them.
+    // items[] → contents, in the GA4 layer: object/field/table contents (even []) replace them.
     if (getType(ev.items) === 'array' && ev.items.length > 0) {
       var skipped = 0;
       var contents = [];
       for (var i = 0; i < ev.items.length; i++) {
         var it = ev.items[i];
         if (!it) { skipped++; continue; }
-        // Multi-source item id: item_id (GA4 EE) || id (Shoptet/legacy).
-        var itemId = getFirstValue([it.item_id, it.id], 'id');
+        // Multi-source item id: item_id (GA4) || id (Shoptet/legacy).
+        var itemId = pickGa4(it, ['item_id', 'id'], 'id', 'ga4.items.');
         if (itemId === undefined) { skipped++; continue; }
         var c = { id: itemId };
 
-        var itemName = getFirstValue([it.item_name, it.name], 'text');
+        var itemName = pickGa4(it, ['item_name', 'name'], 'text', 'ga4.items.');
         if (itemName !== undefined) c.content_name = itemName;
 
         // Multi-source unit_price: price || priceWithVat || fullPrice.
-        var price = getFirstValue([it.price, it.priceWithVat, it.fullPrice], 'number');
+        var price = pickGa4(it, ['price', 'priceWithVat', 'fullPrice'], 'number', 'ga4.items.');
         if (price !== undefined) c.unit_price = roundTo2(price);
 
         // Quantity is passed through as sent; normalizeContents() defaults a missing one to 1
@@ -1353,12 +1413,78 @@ function extractFromEventData(data, ev) {
 
     // Multi-source value: value (GA4 standard) || revenue || totalWithoutVat.
     // No fallback to the item prices: unit_price includes VAT, value excludes it (rtgconv.json).
-    var effectiveValue = getFirstValue([ev.value, ev.revenue, ev.totalWithoutVat], 'number');
-    if (effectiveValue !== undefined) out.eventData.value = roundTo2(effectiveValue);
+    var value = pickGa4(ev, ['value', 'revenue', 'totalWithoutVat'], 'number', 'ga4.');
+    if (value !== undefined) out.eventData.value = roundTo2(value);
   }
 
-  // Explicit-false check: see comment above on autoMapEventData.
+  // Explicit-false check: see autoMapEventData above.
   if (data.autoMapUserData !== false) out.userData = extractGa4UserData(ev);
+  return out;
+}
+
+/*******************************************************************************
+ * Input objects
+ ******************************************************************************/
+
+// The User Data Object and Event Data Object wrappers. A malformed wrapper is logged as an ERROR
+// (always) and omitted; the hit continues to the final validation.
+function parseInputFields(data) {
+  return {
+    userData: parseObjectField('userDataObject', data.userDataObject),
+    eventData: parseObjectField('eventDataObject', data.eventDataObject)
+  };
+}
+
+// An object, a JSON object string, or missing (isMissing). Other values, including false and 0,
+// are input errors. Sandboxed JS has no try/catch; JSON.parse returns undefined on invalid input.
+function parseObjectField(fieldName, rawValue) {
+  if (isMissing(rawValue)) return undefined;
+  if (getType(rawValue) === 'object') return rawValue;
+  var problem = 'expected object or JSON string, got ' + getType(rawValue);
+  if (getType(rawValue) === 'string') {
+    var value = JSON.parse(rawValue);
+    if (getType(value) === 'object') return value;
+    problem = value === undefined ? 'invalid JSON, got string' : 'expected a JSON object, got string';
+  }
+  error(fieldName + ': ' + problem + '; omitting it | trace=' + traceId);
+  return undefined;
+}
+
+function isAliasKey(key) {
+  for (var i = 0; i < USER_DATA_ALIAS_MAP.length; i++) {
+    if (USER_DATA_ALIAS_MAP[i].alias === key) return true;
+  }
+  return false;
+}
+
+// Builds a fresh object from a userDataObject input.
+// - Non-alias keys are copied verbatim (Pass 1).
+// - Alias keys are NEVER copied to output; they are translated to canonical (Pass 2).
+// - A WARN is logged and the alias reported once per alias key that is present AND supplied,
+//   regardless of whether canonical wins, so users discover the canonical names.
+// - Canonical wins when supplied (uses isUnset: a placeholder canonical value loses).
+function normalizeUserDataObject(source) {
+  var out = {};
+  if (getType(source) !== 'object') return out;
+  var keys = objectApi.keys(source);
+
+  // Pass 1: copy non-alias keys verbatim — canonical values land first.
+  for (var i = 0; i < keys.length; i++) {
+    if (!isAliasKey(keys[i])) out[keys[i]] = source[keys[i]];
+  }
+
+  // Pass 2: process aliases in array order (deterministic).
+  for (var j = 0; j < USER_DATA_ALIAS_MAP.length; j++) {
+    var entry = USER_DATA_ALIAS_MAP[j];
+    if (!contains(keys, entry.alias) || isUnset(source[entry.alias])) continue;
+    warn('userDataObject.' + entry.alias + ' is a frontend-template alias - prefer canonical key "' +
+      entry.canonical + '" for clarity');
+    noteLegacy('alias', 'alias ' + entry.alias + '→' + entry.canonical);
+    if (isUnset(out[entry.canonical])) {
+      out[entry.canonical] = source[entry.alias];
+    }
+  }
+
   return out;
 }
 
@@ -1371,9 +1497,9 @@ function extractFromSingleUrl(url) {
   if (!url) return '';
   // FB CAPI ref pattern for preview-ping guard (sandbox-safe; matches at offset 0).
   if (url.lastIndexOf('https://gtm-msr.appspot.com/', 0) === 0) return '';
-  var parsed = parseUrl(url);
-  if (!parsed || !parsed.searchParams) return '';
-  var v = parsed.searchParams.sznaiid;
+  var parsedUrl = parseUrl(url);
+  if (!parsedUrl || !parsedUrl.searchParams) return '';
+  var v = parsedUrl.searchParams.sznaiid;
   if (getType(v) === 'array') v = v[0];
   return v || '';
 }
@@ -1394,33 +1520,30 @@ function extractSznaiidFromUrl(ev) {
          '';
 }
 
-// Plans the sznaiid value to inject into the payload from one of three sources,
-// in order: cookie (if persistence enabled and cookie exists), URL (always tried),
-// returning value '' if none.
-//
-// No side effects: `writeCookie` is true when persistSznaiidCookie=true AND a fresh
-// sznaiid is in the URL (first_touch / last_touch mode). The caller writes the cookie
-// only after the payload has passed validation.
-//
-// IMPORTANT: when persistSznaiidCookie=false, no cookie is read or written —
-// but URL-extracted sznaiid is STILL returned and injected into event_data.sznaiid.
-// Disabling cookie persistence does not disable URL-based attribution capture.
+// Plans the sznaiid value to inject into the payload: a click ID from the URL (last touch: it
+// always replaces the cookie and refreshes its lifetime), else the cookie, else ''.
+// No side effects: the caller writes the cookie only after the payload has passed validation.
+// When persistSznaiidCookie=false, no cookie is read or written, but a click ID from the URL is
+// still injected into event_data.sznaiid.
 function planSznaiid(ev) {
   var fromUrl = extractSznaiidFromUrl(ev);
-  // Explicit-false check: GTM may not hydrate the new parameter's defaultValue=true
-  // into existing tag instances on template upgrade. Treat undefined as default ON.
+  // Explicit-false check: GTM may not hydrate the parameter's defaultValue=true into existing
+  // tag instances on template upgrade. Treat undefined as default ON.
   if (data.persistSznaiidCookie === false) return { value: fromUrl, writeCookie: false };
-
-  var existing = getFirstCookie('sznaiid');
-  var writeCookie = !!fromUrl &&
-    (data.persistSznaiidCookieMode === 'last_touch' || !existing);
-
-  return { value: writeCookie ? fromUrl : (existing || fromUrl), writeCookie: writeCookie };
+  if (fromUrl) return { value: fromUrl, writeCookie: true };
+  return { value: getFirstCookie('sznaiid'), writeCookie: false };
 }
 
+// Runs only for a hit that passed validation, so the ignored v2.x cookie settings are reported only
+// when they would have changed this write: first touch would have kept the existing cookie, and a
+// stored lifetime (numeric or not) that differs from the fixed one.
 function writeSznaiidCookie(value) {
-  var maxAge = makeNumber(data.sznaiidCookieMaxAge);
-  if (!maxAge || maxAge <= 0) maxAge = 7776000;
+  if (data.persistSznaiidCookieMode === 'first_touch' && getFirstCookie('sznaiid')) {
+    noteLegacy('setting', 'persistSznaiidCookieMode');
+  }
+  if (!isMissing(data.sznaiidCookieMaxAge) && toNumber(data.sznaiidCookieMaxAge) !== SZNAIID_MAX_AGE) {
+    noteLegacy('setting', 'sznaiidCookieMaxAge');
+  }
 
   // Option names as documented for setCookie: sameSite ('strict' | 'lax' | 'none') and httpOnly.
   setCookie('sznaiid', value, {
@@ -1428,7 +1551,7 @@ function writeSznaiidCookie(value) {
     path: '/',
     sameSite: 'lax',
     secure: true,
-    'max-age': maxAge,
+    'max-age': SZNAIID_MAX_AGE,
     httpOnly: false
   });
 }
@@ -1437,30 +1560,34 @@ function writeSznaiidCookie(value) {
  * Payload builders
  ******************************************************************************/
 
-function buildPayload(data, parsed, consent, sznaiidValue) {
+function buildPayload(eventName, ga4, parsed, consent, sznaiidValue, identity) {
   var eventTime = normalizeEventTime(data.eventTime);
-  var eventUrl = data.eventUrl || ga4.eventUrl || getRequestHeader('referer') || '';
 
+  // event_url: the first usable source, a non-blank string that is not a placeholder (objects are
+  // never stringified). Without one the property is omitted.
+  var urls = [data.eventUrl, ga4.eventUrl, getRequestHeader('referer')];
+  var eventUrl;
+  for (var i = 0; i < urls.length && eventUrl === undefined; i++) {
+    if (getType(urls[i]) === 'string' && !isUnset(urls[i])) eventUrl = urls[i];
+  }
   // Spec-conformance WARN: docs mark event_url as required.
-  if (!eventUrl) {
-    warn('event_url is empty (no eventUrl, ga4.eventUrl, or referer); docs mark it required');
+  if (eventUrl === undefined) {
+    warn('event_url is empty (no Event URL, GA4 page_location or Referer); omitting it, docs mark it required');
   }
 
-  var eventData = buildEventData(data, parsed, sznaiidValue);
-
   var payload = {
-    event_name: resolvedEventName,
+    event_name: eventName,
     schema_version: 'v2',
     event_type: 'rtgconv',
     event_time: eventTime,
-    event_source: data.eventSource || 'web',
-    event_url: eventUrl,
-    event_data: eventData,
-    api: {
-      name: 'gtm-server-template',
-      version: API_CLIENT_VERSION,
-      template_version: TEMPLATE_VERSION
-    }
+    event_source: data.eventSource || 'web'
+  };
+  addIfPresent(payload, 'event_url', eventUrl);
+  payload.event_data = buildEventData(eventName, ga4, parsed.eventData, sznaiidValue);
+  payload.api = {
+    name: 'gtm-server-template',
+    version: API_CLIENT_VERSION,
+    template_version: TEMPLATE_VERSION
   };
 
   var eventId = {};
@@ -1474,7 +1601,7 @@ function buildPayload(data, parsed, consent, sznaiidValue) {
 
   addIfPresent(payload, 'consent_string', consent.string);
 
-  var userData = buildUserData(data, parsed.userData.value);
+  var userData = buildUserData(ga4, parsed.userData, identity);
   if (hasProperties(userData)) {
     payload.user_ids = { user_data: userData };
   } else {
@@ -1511,17 +1638,27 @@ function normalizeEventTime(rawValue) {
   return ms;
 }
 
+// Client IP and User-Agent come from the GA4 client's event data (ip_override, user_agent) when it
+// has them, else from the request headers; Client Hints come from the headers.
 function buildS2sHeaders() {
   var headers = {};
+  var ev = getType(inboundEvent) === 'object' ? inboundEvent : {};
 
-  // Client IP: take first entry from x-forwarded-for
-  var xff = getRequestHeader('x-forwarded-for');
-  if (xff) {
-    var firstIp = xff.split(',')[0];
-    if (firstIp) headers.client_ip_address = firstIp.trim();
+  if (getType(ev.ip_override) === 'string' && !isMissing(ev.ip_override)) {
+    headers.client_ip_address = ev.ip_override.trim();
+  } else {
+    // First entry of x-forwarded-for.
+    var xff = getRequestHeader('x-forwarded-for');
+    if (xff) {
+      var firstIp = xff.split(',')[0];
+      if (firstIp) headers.client_ip_address = firstIp.trim();
+    }
   }
 
-  addIfPresent(headers, 'user_agent', getRequestHeader('user-agent'));
+  var userAgent = (getType(ev.user_agent) === 'string' && !isMissing(ev.user_agent))
+    ? ev.user_agent
+    : getRequestHeader('user-agent');
+  addIfPresent(headers, 'user_agent', userAgent);
   addIfPresent(headers, 'sec_ch_ua', getRequestHeader('sec-ch-ua'));
   addIfPresent(headers, 'sec_ch_ua_mobile', getRequestHeader('sec-ch-ua-mobile'));
   addIfPresent(headers, 'sec_ch_ua_model', getRequestHeader('sec-ch-ua-model'));
@@ -1531,85 +1668,22 @@ function buildS2sHeaders() {
   return headers;
 }
 
-// USER_DATA_ALIAS_MAP is declared near the top (before the main execution flow) so it
-// is initialized before buildUserData() runs. See note there.
-
-function isAliasKey(key) {
-  for (var i = 0; i < USER_DATA_ALIAS_MAP.length; i++) {
-    if (USER_DATA_ALIAS_MAP[i].alias === key) return true;
-  }
-  return false;
-}
-
-// Builds a fresh normalized object from a userDataObject input.
-// - Non-alias keys are copied verbatim (Pass 1).
-// - Alias keys are NEVER copied to output; they are translated to canonical (Pass 2).
-// - WARN logs once per alias key that is present AND non-empty, regardless of
-//   whether canonical wins — this helps users discover canonical names.
-// - Canonical wins when supplied (uses isUnset: a placeholder canonical value loses).
-function normalizeUserDataObject(source) {
-  if (!source) return source;
-  var out = {};
-
-  // Pass 1: copy non-alias keys verbatim — canonical values land first.
-  for (var key in source) {
-    if (!source.hasOwnProperty(key)) continue;
-    if (isAliasKey(key)) continue;
-    out[key] = source[key];
-  }
-
-  // Pass 2: process aliases in array order (deterministic).
-  for (var i = 0; i < USER_DATA_ALIAS_MAP.length; i++) {
-    var entry = USER_DATA_ALIAS_MAP[i];
-    if (!source.hasOwnProperty(entry.alias)) continue;
-    var aliasVal = source[entry.alias];
-    if (isUnset(aliasVal)) continue;
-    warn('userDataObject.' + entry.alias + ' is a frontend-template alias - prefer canonical key "' +
-      entry.canonical + '" for clarity');
-    if (isUnset(out[entry.canonical])) {
-      out[entry.canonical] = aliasVal;
-    }
-  }
-
-  return out;
-}
-
-function buildUserData(data, parsedUserDataObject) {
+// user_data layers, lowest priority first: GA4 prefill, the User Data Object (aliases translated),
+// the legacy fields, the legacy override rows, the User data table. Then one typed normalization
+// pass, then sid / udid: explicit first, the request cookies as the lowest-priority source.
+function buildUserData(ga4, parsedUserData, identity) {
   var merged = {};
-
-  // Layer 0: GA4 auto-mapped sha256_* fields (no-op when auto-map disabled).
   mergeObject(merged, ga4.userData, 'user_data.');
+  mergeObject(merged, normalizeUserDataObject(parsedUserData), 'user_data.');
+  applyLegacyUserFields(merged);
+  if (applyRows(merged, data.userDataOverrides, 'user_data.', 'name')) noteLegacy('override', 'userDataOverrides');
+  applyRows(merged, data.userDataTable, 'user_data.', 'key');
 
-  // Layer 1: object variable, with FE-template alias normalization.
-  if (parsedUserDataObject) {
-    mergeObject(merged, normalizeUserDataObject(parsedUserDataObject), 'user_data.');
-  }
-
-  // Layer 2: individual fields
-  addLayerValue(merged, 'user_data.', 'sid', data.sid);
-  addLayerValue(merged, 'user_data.', 'em', data.userEmail);
-  addLayerValue(merged, 'user_data.', 'ph', data.userPhone);
-  addLayerValue(merged, 'user_data.', 'fn', data.userFirstName);
-  addLayerValue(merged, 'user_data.', 'ln', data.userLastName);
-  addLayerValue(merged, 'user_data.', 'ge', data.userGender);
-  addLayerValue(merged, 'user_data.', 'db', data.userDob);
-  addLayerValue(merged, 'user_data.', 'ct', data.userCity);
-  // `userState` retained as deprecated runtime fallback (UI renamed to `userRegion`, wire key `region`).
-  // It applies only when userRegion is not supplied; a supplied invalid userRegion stays authoritative.
-  addLayerValue(merged, 'user_data.', 'region', isUnset(data.userRegion) ? data.userState : data.userRegion);
-  addLayerValue(merged, 'user_data.', 'zp', data.userZip);
-  addLayerValue(merged, 'user_data.', 'sr', data.userStreet);
-  addLayerValue(merged, 'user_data.', 'country', data.userCountry);
-  addLayerValue(merged, 'user_data.', 'subscription_id', data.userSubscriptionId);
-  addLayerValue(merged, 'user_data.', 'udid', data.userUdid);
-
-  // Layer 3: override table
-  applyOverrides(merged, data.userDataOverrides, 'user_data.');
-
-  // One typed normalization pass: unknown keys are dropped, every value is a non-empty string.
+  // Unknown keys are dropped, every value is a non-empty string.
   var userData = {};
-  for (var key in merged) {
-    if (!merged.hasOwnProperty(key)) continue;
+  var keys = objectApi.keys(merged);
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
     if (!contains(USER_DATA_KEYS, key)) {
       warn('user_data.' + key + ' is not a Seznam field, dropping');
       continue;
@@ -1618,11 +1692,10 @@ function buildUserData(data, parsedUserDataObject) {
     setNormalized(userData, key, 'id', merged[key], 'user_data.' + key);
   }
 
-  // Layer 4: sid / udid, with the request cookies as the LOWEST-priority source.
   identity.sid = resolveIdentity(userData, 'sid', merged.sid);
   identity.udid = resolveIdentity(userData, 'udid', merged.udid);
   if (identity.sid === 'missing') {
-    warn('no valid sid (tag fields, User Data Object, overrides or sid cookie); ' +
+    warn('no valid sid (tag fields, User Data Object, tables or sid cookie); ' +
       'Seznam can match this hit only on the other identifiers');
   }
 
@@ -1630,7 +1703,7 @@ function buildUserData(data, parsedUserDataObject) {
 }
 
 // sid and udid follow one shape rule whatever their source. The explicit value (object, field or
-// override) is checked first; a malformed one is dropped with a WARN, so a valid request cookie
+// table) is checked first; a malformed one is dropped with a WARN, so a valid request cookie
 // can still fill the gap. Sets userData[name] and returns the source: 'tag', 'cookie' or 'missing'.
 // Cookie fallback notes:
 // - Explicit-false check: defaultValue=true may not hydrate into existing instances on
@@ -1669,53 +1742,28 @@ function isValidIdentity(name, value) {
   return name === 'sid' ? isValidSid(value) : isValidUdid(value);
 }
 
-function buildEventData(data, parsed, sznaiidValue) {
+// event_data layers, lowest priority first: GA4 prefill, the Event Data Object, the sznaiid from
+// the URL or cookie (only into a gap), the legacy fields and Status, the legacy override rows, the
+// Event data table. Then one typed normalization pass; sem_id is set last.
+function buildEventData(eventName, ga4, parsedEventData, sznaiidValue) {
   var merged = {};
-
-  // Layer 0: GA4 auto-mapped fields, including contents from items[] (no-op when auto-map disabled).
   mergeObject(merged, ga4.eventData, 'event_data.');
-
-  // Layer 1: object variable
-  mergeObject(merged, parsed.eventData.value, 'event_data.');
-
-  // Layer 1b: sznaiid fallback from cookie / URL.
-  // Manual data.sznaiid (Layer 2 below) overrides this.
+  mergeObject(merged, parsedEventData, 'event_data.');
   if (sznaiidValue && isMissing(merged.sznaiid)) merged.sznaiid = sznaiidValue;
+  applyLegacyEventFields(merged);
+  applyLegacyStatus(merged);
+  if (applyRows(merged, data.eventDataOverrides, 'event_data.', 'name')) noteLegacy('override', 'eventDataOverrides');
+  applyRows(merged, data.eventDataTable, 'event_data.', 'key');
 
-  // Layer 2: individual fields. Values are converted to their wire types below.
-  addLayerValue(merged, 'event_data.', 'sznaiid', data.sznaiid);
-  addLayerValue(merged, 'event_data.', 'currency', data.currency);
-  addLayerValue(merged, 'event_data.', 'value', data.value);
-  addLayerValue(merged, 'event_data.', 'value_tax', data.valueTax);
-  addLayerValue(merged, 'event_data.', 'order_id', data.orderId);
-  addLayerValue(merged, 'event_data.', 'content_type', data.contentType);
-  addLayerValue(merged, 'event_data.', 'delivery_price', data.deliveryPrice);
-  addLayerValue(merged, 'event_data.', 'delivery_type', data.deliveryType);
-  addLayerValue(merged, 'event_data.', 'payment_type', data.paymentType);
-  addLayerValue(merged, 'event_data.', 'other_costs', data.otherCosts);
-  addLayerValue(merged, 'event_data.', 'predicted_ltv', data.predictedLtv);
-  addLayerValue(merged, 'event_data.', 'goods_intention', data.goodsIntention);
-  addLayerValue(merged, 'event_data.', 'goods_phase', data.goodsPhase);
-  addLayerValue(merged, 'event_data.', 'search_string', data.searchString);
-  addLayerValue(merged, 'event_data.', 'review_email', data.reviewEmail); // NOT hashed - intentional (Zbozi.cz survey).
-  addLayerValue(merged, 'event_data.', 'product_ids', parsed.productIds.value);
-  addLayerValue(merged, 'event_data.', 'contents', parsed.contents.value);
-
-  // status: `statusEnabled` distinguishes "not set" from false. The value is converted by the
-  // same boolean normalizer as the other layers; enabled without a value sends false (historic).
-  if (data.statusEnabled) {
-    merged.status = isUnset(data.status) ? false : data.status;
-  }
-
-  // Layer 3: override table
-  applyOverrides(merged, data.eventDataOverrides, 'event_data.');
-
-  // One typed normalization pass over the merged layers: unknown keys are dropped, every
-  // value is converted to its wire type, invalid optional values are omitted with a WARN.
+  // Unknown keys are dropped, every value is converted to its wire type, invalid optional values
+  // are omitted with a WARN.
   var ed = {};
-  for (var key in merged) {
-    if (!merged.hasOwnProperty(key) || key === 'sem_id') continue;
-    if (!EVENT_DATA_TYPES.hasOwnProperty(key)) {
+  var keys = objectApi.keys(merged);
+  var knownKeys = objectApi.keys(EVENT_DATA_TYPES);
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    if (key === 'sem_id') continue;
+    if (!contains(knownKeys, key)) {
       warn('event_data.' + key + ' is not a Seznam field, dropping');
       continue;
     }
@@ -1735,9 +1783,9 @@ function buildEventData(data, parsed, sznaiidValue) {
   }
 
   // FE-parity convenience: CompleteRegistration defaults to status=true only when NO layer
-  // supplied a status (object → individual → overrides). False from any layer is kept, and an
-  // invalid status (e.g. 'no') is omitted with a WARN rather than turned into true.
-  if (resolvedEventName === 'CompleteRegistration' && merged.status === undefined) {
+  // supplied a status. False from any layer is kept, and an invalid status (e.g. 'no') is
+  // omitted with a WARN rather than turned into true.
+  if (eventName === 'CompleteRegistration' && merged.status === undefined) {
     ed.status = true;
   }
 
@@ -1747,11 +1795,74 @@ function buildEventData(data, parsed, sznaiidValue) {
   return ed;
 }
 
+/*******************************************************************************
+ * Layers
+ ******************************************************************************/
+
+// The merge contract (R8): a value that is not supplied never erases an earlier layer. Genuinely
+// invalid supplied values still override and are then normalized and validated. Returns true when
+// the value was applied.
+function addLayerValue(target, prefix, key, value) {
+  if (isUnsupplied(prefix + key, key, value)) return false;
+  target[key] = value;
+  return true;
+}
+
+// Not supplied: missing, or a placeholder ('undefined'/'null') in any key except free text.
+// A skipped placeholder is reported, because it points at a broken variable mapping.
+function isUnsupplied(path, key, value) {
+  if (isMissing(value)) return true;
+  if (isPlaceholder(value) && !contains(FREE_TEXT_KEYS, key)) {
+    warn(path + ' is the placeholder string "' + value.trim() + '"; treating it as missing');
+    return true;
+  }
+  return false;
+}
+
+// Copies the supplied values of `source` onto `target` (see addLayerValue).
+function mergeObject(target, source, prefix) {
+  if (getType(source) !== 'object') return;
+  var keys = objectApi.keys(source);
+  for (var i = 0; i < keys.length; i++) {
+    addLayerValue(target, prefix, keys[i], source[keys[i]]);
+  }
+}
+
+// Table rows, keyed by `keyColumn` ('name' in the legacy override tables, 'key' in the v3 tables):
+// later rows win, with the layer rule of addLayerValue(); false and 0 are values. Values keep
+// their raw type here and are converted by the normalization pass. Returns true when at least one
+// row supplied a value.
+function applyRows(obj, rows, prefix, keyColumn) {
+  var applied = false;
+  if (getType(rows) !== 'array') return applied;
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i];
+    if (getType(row) !== 'object' || isMissing(row[keyColumn])) continue;
+    if (addLayerValue(obj, prefix, row[keyColumn], row.value)) applied = true;
+  }
+  return applied;
+}
+
+/*******************************************************************************
+ * Normalization
+ ******************************************************************************/
+
 // Converts one present value to its wire type (see EVENT_DATA_TYPES). Returns undefined,
 // with a WARN naming the field and the received type, when the value does not fit.
 function normalizeValue(type, value, path) {
-  if (type === 'contents') return normalizeContents(value, path);
-  if (type === 'product_ids') return normalizeProductIds(value, path);
+  if (type === 'contents' || type === 'product_ids') {
+    // A string from any layer is a JSON array. It is parsed here, after the merge, so a winning
+    // value that does not parse is omitted and never brings back a lower layer's array.
+    var list = value;
+    if (getType(value) === 'string') {
+      list = JSON.parse(value);
+      if (list === undefined) {
+        warn(path + ': invalid JSON, got string; omitting');
+        return undefined;
+      }
+    }
+    return type === 'contents' ? normalizeContents(list, path) : normalizeProductIds(list, path);
+  }
   var out;
   var expected = type;
   if (type === 'id' || type === 'text') {
@@ -1783,7 +1894,7 @@ function setNormalized(obj, key, type, value, path) {
   if (normalized !== undefined) obj[key] = normalized;
 }
 
-// Contents from every source (GA4 items, object, field, overrides). A missing quantity, or the
+// Contents from every source (GA4 items, object, field, tables). A missing quantity, or the
 // placeholder 'undefined'/'null' (R7), becomes 1;
 // an item whose quantity is present but not an integer >= 1 (0, negative, fractional,
 // non-numeric, non-finite) is dropped with a WARN and the other items are kept. An explicit []
@@ -1793,6 +1904,7 @@ function normalizeContents(list, path) {
     warn(path + ': expected array, got ' + getType(list) + '; omitting');
     return undefined;
   }
+  var itemKeys = objectApi.keys(CONTENT_ITEM_TYPES);
   var out = [];
   for (var i = 0; i < list.length; i++) {
     var item = list[i];
@@ -1803,9 +1915,11 @@ function normalizeContents(list, path) {
     }
     var content = { quantity: 1 };
     var keep = true;
-    for (var key in item) {
-      if (!item.hasOwnProperty(key) || isUnsupplied(itemPath + '.' + key, key, item[key])) continue;
-      if (!CONTENT_ITEM_TYPES.hasOwnProperty(key)) {
+    var keys = objectApi.keys(item);
+    for (var k = 0; k < keys.length; k++) {
+      var key = keys[k];
+      if (isUnsupplied(itemPath + '.' + key, key, item[key])) continue;
+      if (!contains(itemKeys, key)) {
         warn(itemPath + '.' + key + ' is not a Seznam field, dropping');
       } else if (key === 'quantity') {
         var quantity = toNumber(item.quantity);
@@ -1844,64 +1958,6 @@ function normalizeProductIds(list, path) {
     out.push(n);
   }
   return (list.length > 0 && out.length === 0) ? undefined : out;
-}
-
-/*******************************************************************************
- * Shared utilities
- ******************************************************************************/
-
-// Parse a field that may be an object, a JSON string, or missing (isMissing). Returns {value, error}.
-// Other values, including false and 0, are input errors.
-// Callers decide severity (WARN vs. fail) based on strictEventValidation.
-// Note: sandboxed JS does not support try/catch, but JSON.parse returns undefined on invalid input.
-function parseJsonObjectField(fieldName, rawValue) {
-  if (isMissing(rawValue)) return { value: null, error: null };
-  if (getType(rawValue) === 'object') return { value: rawValue, error: null };
-  if (getType(rawValue) === 'string') {
-    var parsed = JSON.parse(rawValue);
-    if (parsed === undefined) {
-      return { value: null, error: fieldName + ': invalid JSON, got string' };
-    }
-    if (getType(parsed) === 'object') return { value: parsed, error: null };
-    return { value: null, error: fieldName + ': expected a JSON object, got string' };
-  }
-  return { value: null, error: fieldName + ': expected object or JSON string, got ' + getType(rawValue) };
-}
-
-// Parse a field that may be an array, a JSON string of an array, or empty. Returns {value, error}.
-function parseJsonArray(fieldName, rawValue) {
-  if (isMissing(rawValue)) return { value: null, error: null };
-  if (getType(rawValue) === 'array') return { value: rawValue, error: null };
-  if (getType(rawValue) === 'string') {
-    var parsed = JSON.parse(rawValue);
-    if (parsed === undefined) {
-      return { value: null, error: fieldName + ': invalid JSON, got string' };
-    }
-    if (getType(parsed) === 'array') return { value: parsed, error: null };
-    return { value: null, error: fieldName + ': expected a JSON array, got string' };
-  }
-  return { value: null, error: fieldName + ': expected array or JSON string, got ' + getType(rawValue) };
-}
-
-// The one "not supplied" rule for every input: undefined, null and blank strings.
-// false, 0 and [] are values.
-function isMissing(v) {
-  return v === undefined || v === null || (getType(v) === 'string' && v.trim() === '');
-}
-
-// Strings a broken variable mapping produces. They count as missing for IDs, numbers and consent,
-// never for free text.
-function isPlaceholder(v) {
-  return getType(v) === 'string' && (v.trim() === 'undefined' || v.trim() === 'null');
-}
-
-function isUnset(v) {
-  return isMissing(v) || isPlaceholder(v);
-}
-
-// Type description for WARN/ERROR lines; never includes the value itself.
-function describeType(v) {
-  return isPlaceholder(v) ? 'the placeholder string "' + v.trim() + '"' : getType(v);
 }
 
 // Strings are trimmed and finite numbers become strings (numeric order or event IDs).
@@ -1945,23 +2001,9 @@ function toBoolean(v) {
   return undefined;
 }
 
-// Strict-equality membership test (true and 'true' are different entries).
-function contains(list, v) {
-  for (var i = 0; i < list.length; i++) {
-    if (list[i] === v) return true;
-  }
-  return false;
-}
-
-function warn(message) {
-  logToConsole('Seznam SEM [WARN]: ' + message + ' | trace=' + traceId);
-}
-
-function addIfPresent(obj, key, value) {
-  if (!isMissing(value)) {
-    obj[key] = value;
-  }
-}
+/*******************************************************************************
+ * Identity and SEM ID checks
+ ******************************************************************************/
 
 // Returns the first value of an inbound request cookie, or '' when absent.
 function getFirstCookie(name) {
@@ -2012,57 +2054,61 @@ function isValidSemId(id) {
   return true;
 }
 
-// Override rows: later rows win, with the layer rule of addLayerValue(); false and 0 are values.
-// Values keep their raw type here and are converted by the normalization pass.
-function applyOverrides(obj, table, prefix) {
-  if (!table) return;
-  for (var i = 0; i < table.length; i++) {
-    var row = table[i];
-    if (row && row.name) addLayerValue(obj, prefix, row.name, row.value);
-  }
-}
+/*******************************************************************************
+ * Transport
+ ******************************************************************************/
 
-// Copies the supplied values of `source` onto `target` (see addLayerValue).
-function mergeObject(target, source, prefix) {
-  if (!source) return;
-  for (var key in source) {
-    if (source.hasOwnProperty(key)) addLayerValue(target, prefix, key, source[key]);
-  }
-}
-
-// The merge contract (R8): a value that is not supplied never erases an earlier layer. Genuinely
-// invalid supplied values still override and are then normalized and validated.
-function addLayerValue(target, prefix, key, value) {
-  if (!isUnsupplied(prefix + key, key, value)) target[key] = value;
-}
-
-// Not supplied: missing, or a placeholder ('undefined'/'null') in any key except free text.
-// A skipped placeholder is reported, because it points at a broken variable mapping.
-function isUnsupplied(path, key, value) {
-  if (isMissing(value)) return true;
-  if (isPlaceholder(value) && !contains(FREE_TEXT_KEYS, key)) {
-    warn(path + ' is the placeholder string "' + value.trim() + '"; treating it as missing');
-    return true;
-  }
-  return false;
-}
-
-// Iterates with hasOwnProperty, which v2.3 already depends on. The server API offers
-// require('Object').keys; switching to it is deferred to v3 (review N3).
-function hasProperties(obj) {
-  if (!obj) return false;
-  for (var key in obj) {
-    if (obj.hasOwnProperty(key)) {
-      return true;
+// Sends the payload. The tag status follows Seznam's HTTP answer, unless Use Optimistic Scenario
+// is checked: then the tag succeeds at once and HTTP errors are only logged.
+function send(payload) {
+  var optimistic = data.useOptimisticScenario === true;
+  sendHttpRequest(
+    API_URL,
+    {
+      headers: {
+        'content-type': 'application/json',
+        'X-Client-Id': 'gtm-server-template-seznam-sem',
+        'X-Client-Version': TEMPLATE_VERSION
+      },
+      method: 'POST',
+      timeout: TIMEOUT_MS
+    },
+    JSON.stringify(payload)
+  ).then(function(result) {
+    if (shouldLog()) {
+      logToConsole(JSON.stringify({
+        Name: 'Seznam SEM',
+        Type: 'Response',
+        TraceId: traceId,
+        EventName: eventName,
+        ResponseStatusCode: result.statusCode,
+        ResponseHeaders: result.headers,
+        ResponseBody: result.body
+      }));
     }
-  }
-  return false;
-}
 
-function log(message) {
-  if (data.testMode) {
-    logToConsole(JSON.stringify(message));
-  }
+    logToBigQuery(
+      { url: API_URL, body: payload },
+      { statusCode: result.statusCode, headers: result.headers, body: result.body }
+    );
+
+    if (result.statusCode >= 200 && result.statusCode < 300) {
+      if (!optimistic) data.gtmOnSuccess();
+    } else {
+      logHttpError(result);
+      if (!optimistic) data.gtmOnFailure();
+    }
+  }).catch(function(reason) {
+    // sendHttpRequest rejects with { reason: 'failed' | 'timed_out' }.
+    var why = (reason && reason.reason) ? reason.reason : JSON.stringify(reason);
+    error('request to Seznam failed: ' + ('' + why).substring(0, 200) +
+      ' | event=' + eventName + ' | trace=' + traceId);
+    logToBigQuery({ url: API_URL, body: payload });
+
+    if (!optimistic) data.gtmOnFailure();
+  });
+
+  if (optimistic) data.gtmOnSuccess();
 }
 
 function logHttpError(result) {
@@ -2073,8 +2119,8 @@ function logHttpError(result) {
     ? ' | hint=Seznam rejected the SEM ID or the endpoint access: use the S2S SEM ID from Sklik ' +
       '(advanced account settings), not the sul.js SEM ID'
     : '';
-  logToConsole('Seznam SEM [ERROR]: HTTP ' + result.statusCode +
-    ' | event=' + resolvedEventName +
+  error('HTTP ' + result.statusCode +
+    ' | event=' + eventName +
     ' | semId=' + data.semId +
     ' | request_id=' + requestId +
     ' | trace=' + traceId +
@@ -2086,7 +2132,7 @@ function logToBigQuery(requestInfo, responseInfo) {
 
   var bqRow = {
     tag_name: 'Seznam SEM',
-    event_name: resolvedEventName,
+    event_name: eventName,
     request_method: 'POST',
     request_url: requestInfo.url,
     request_body: JSON.stringify(requestInfo.body),
@@ -2109,8 +2155,52 @@ function logToBigQuery(requestInfo, responseInfo) {
     [bqRow],
     { ignoreUnknownValues: true }
   ).catch(function(errors) {
-    logToConsole('Seznam SEM [ERROR]: BigQuery insert failed: ' + JSON.stringify(errors));
+    error('BigQuery insert failed: ' + JSON.stringify(errors));
   });
+}
+
+/*******************************************************************************
+ * Utilities
+ ******************************************************************************/
+
+// The one "not supplied" rule for every input: undefined, null and blank strings.
+// false, 0 and [] are values.
+function isMissing(v) {
+  return v === undefined || v === null || (getType(v) === 'string' && v.trim() === '');
+}
+
+// Strings a broken variable mapping produces. They count as missing for IDs, numbers and consent,
+// never for free text.
+function isPlaceholder(v) {
+  return getType(v) === 'string' && (v.trim() === 'undefined' || v.trim() === 'null');
+}
+
+function isUnset(v) {
+  return isMissing(v) || isPlaceholder(v);
+}
+
+// Strict-equality membership test (true and 'true' are different entries).
+function contains(list, v) {
+  for (var i = 0; i < list.length; i++) {
+    if (list[i] === v) return true;
+  }
+  return false;
+}
+
+// Type description for WARN/ERROR lines; never includes the value itself.
+function describeType(v) {
+  return isPlaceholder(v) ? 'the placeholder string "' + v.trim() + '"' : getType(v);
+}
+
+function addIfPresent(obj, key, value) {
+  if (!isMissing(value)) {
+    obj[key] = value;
+  }
+}
+
+// Own keys via require('Object'), so an input key named like an Object method stays an ordinary key.
+function hasProperties(obj) {
+  return getType(obj) === 'object' && objectApi.keys(obj).length > 0;
 }
 
 
@@ -2422,7 +2512,7 @@ ___SERVER_PERMISSIONS___
             "listItem": [
               {
                 "type": 1,
-                "string": "https://sem.seznam.cz/*"
+                "string": "https://sem.seznam.cz/rtgconv"
               }
             ]
           }
@@ -2452,6 +2542,16 @@ ___SERVER_PERMISSIONS___
     },
     "clientAnnotations": {
       "isEditedByUser": true
+    },
+    "isRequired": true
+  },
+  {
+    "instance": {
+      "key": {
+        "publicId": "read_container_data",
+        "versionId": "1"
+      },
+      "param": []
     },
     "isRequired": true
   },
