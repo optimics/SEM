@@ -2526,10 +2526,10 @@ scenarios:
     runCode({
       eventNameSelect: 'PageView',
       semId: 'abcdefghijklmnopqrstuvwx',
-      userUdid: 'abc123',
+      userUdid: '019ef805-5dbe-7e8b-acd1-8caed14a91fa',
       useOptimisticScenario: false
     });
-    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('abc123');
+    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('019ef805-5dbe-7e8b-acd1-8caed14a91fa');
 
 - name: sid is auto-mapped from the 'sid' request cookie when no explicit field
   code: |-
@@ -2573,19 +2573,19 @@ scenarios:
       return Promise.create((r) => r({ statusCode: 200 }));
     });
     mock('getCookieValues', (name) => {
-      if (name === 'sid') return ['id=COOKIE'];
-      if (name === 'udid') return ['cookie-uuid@123'];
+      if (name === 'sid') return ['id=1|t=1.000|te=1.000|c=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'];
+      if (name === 'udid') return ['11111111-2222-3333-4444-555555555555@123'];
       return [];
     });
     runCode({
       eventNameSelect: 'PageView',
       semId: 'abcdefghijklmnopqrstuvwx',
-      sid: 'id=EXPLICIT',
-      userUdid: 'explicit-uuid',
+      sid: 'id=2|t=2.000|te=2.000|c=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+      userUdid: '019ef805-5dbe-7e8b-acd1-8caed14a91fa',
       useOptimisticScenario: false
     });
-    assertThat(capturedBody.user_ids.user_data.sid).isEqualTo('id=EXPLICIT');
-    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('explicit-uuid');
+    assertThat(capturedBody.user_ids.user_data.sid).isEqualTo('id=2|t=2.000|te=2.000|c=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB');
+    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('019ef805-5dbe-7e8b-acd1-8caed14a91fa');
 
 - name: cookie auto-map of sid/udid can be disabled
   code: |-
@@ -2624,11 +2624,14 @@ scenarios:
     runCode({
       eventNameSelect: 'PageView',
       semId: 'abcdefghijklmnopqrstuvwx',
-      userDataObject: { sid: 'id=OBJECT', udid: 'object-uuid' },
+      userDataObject: {
+        sid: 'id=2|t=2.000|te=2.000|c=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+        udid: '11111111-2222-3333-4444-555555555555'
+      },
       useOptimisticScenario: false
     });
-    assertThat(capturedBody.user_ids.user_data.sid).isEqualTo('id=OBJECT');
-    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('object-uuid');
+    assertThat(capturedBody.user_ids.user_data.sid).isEqualTo('id=2|t=2.000|te=2.000|c=BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB');
+    assertThat(capturedBody.user_ids.user_data.udid).isEqualTo('11111111-2222-3333-4444-555555555555');
 
 - name: malformed sid/udid cookies are rejected, not forwarded
   code: |-
@@ -2703,8 +2706,7 @@ scenarios:
 
 - name: Short semId + strict fails (length check, synchronous validation)
   code: |-
-    // Local check is now length-only (24 chars). 'BAD' = 3 chars fails locally.
-    // Full ^[0-9a-z]{24}$ pattern is enforced server-side.
+    // The local check enforces ^[0-9a-z]{24}$. 'BAD' fails it.
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     runCode({
       eventNameSelect: 'PageView',
@@ -2716,7 +2718,7 @@ scenarios:
 
 - name: Short semId + loose still sends with warning (length check)
   code: |-
-    // Local check is now length-only (24 chars). 'BAD' = 3 chars triggers WARN but hit still goes out.
+    // 'BAD' fails the local ^[0-9a-z]{24}$ check: WARN under loose validation, the hit still goes out.
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     runCode({
       eventNameSelect: 'PageView',
@@ -2729,9 +2731,9 @@ scenarios:
 - name: SemId off pattern 24 chars does not crash regression hotfix v211
   code: |-
     // Hotfix regression: the old charCodeAt-based charset check crashed with TypeError
-    // in the SGTM sandbox. Local validation now only checks length == 24. An off-pattern
-    // 24-char string passes local validation; backend response (e.g. 400) is asserted
-    // irrelevant here — we only verify the tag did not crash and attempted the request.
+    // in the SGTM sandbox. The charset check now uses charAt/indexOf. An off-pattern
+    // 24-char string WARNs under loose validation and is still sent; the backend response
+    // (e.g. 400) is irrelevant here: we only verify the tag did not crash and sent the request.
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 400 })));
     runCode({
       eventNameSelect: 'PageView',
@@ -2798,7 +2800,8 @@ scenarios:
     });
     assertThat(capturedCookieWrite.name).isEqualTo('sznaiid');
     assertThat(capturedCookieWrite.value).isEqualTo('NEWVAL');
-    assertThat(capturedCookieWrite.options.samesite).isEqualTo('Lax');
+    assertThat(capturedCookieWrite.options.sameSite).isEqualTo('lax');
+    assertThat(capturedCookieWrite.options.httpOnly).isEqualTo(false);
     assertThat(capturedCookieWrite.options.secure).isEqualTo(true);
 
 - name: sznaiid cookie NOT overwritten on second event (first_touch) (v22 cookie-3)
@@ -3348,7 +3351,7 @@ scenarios:
     });
     assertThat(capturedBody.event_data.value).isEqualTo(175);
 
-- name: Auto-map value falls back to sum of contents when no value source (v221 automap-10)
+- name: Auto-map does not derive value from the contents (v221 automap-10)
   code: |-
     let capturedBody;
     mock('sendHttpRequest', (url, opts, body) => {
@@ -3368,17 +3371,14 @@ scenarios:
       autoMapEventData: true,
       useOptimisticScenario: false
     });
-    // 10*2 + 5*1 = 25
-    assertThat(capturedBody.event_data.value).isEqualTo(25);
+    // unit_price includes VAT and value excludes it, so the template never sums the items.
+    assertThat(capturedBody.event_data.value).isUndefined();
+    assertThat(capturedBody.event_data.contents.length).isEqualTo(2);
 
-- name: Auto-map value sum of zero-priced contents emits value 0 not undefined (v221 automap-10b)
+- name: Auto-map Purchase without a value source fails even with zero-priced contents (v221 automap-10b)
   code: |-
-    let capturedBody;
-    mock('sendHttpRequest', (url, opts, body) => {
-      capturedBody = JSON.parse(body);
-      return Promise.create((r) => r({ statusCode: 200 }));
-    });
-    // Free items: unit_price 0, quantity 1. Sum is 0, which is a legitimate value.
+    // Free items: unit_price 0. The contents are not a value source, so the Purchase has no value.
+    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     mock('getAllEventData', () => ({
       items: [
         { item_id: 'FREE_A', price: 0, quantity: 1 },
@@ -3394,7 +3394,8 @@ scenarios:
       autoMapEventData: true,
       useOptimisticScenario: false
     });
-    assertThat(capturedBody.event_data.value).isEqualTo(0);
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('sendHttpRequest').wasNotCalled();
 
 - name: Auto-map item id name and price fall back to aliases (v221 automap-11)
   code: |-
@@ -3419,7 +3420,7 @@ scenarios:
     assertThat(capturedBody.event_data.contents[0].content_name).isEqualTo('Shoptet Item');
     assertThat(capturedBody.event_data.contents[0].unit_price).isEqualTo(99);
 
-- name: Auto-map quantity defaults to 1 when missing or non-numeric (v221 automap-12)
+- name: Auto-map quantity defaults to 1 when missing and an invalid quantity drops the item (v221 automap-12)
   code: |-
     let capturedBody;
     mock('sendHttpRequest', (url, opts, body) => {
@@ -3440,9 +3441,11 @@ scenarios:
       autoMapEventData: true,
       useOptimisticScenario: false
     });
-    assertThat(capturedBody.event_data.contents[0].quantity).isEqualTo(1);
-    assertThat(capturedBody.event_data.contents[1].quantity).isEqualTo(1);
-    assertThat(capturedBody.event_data.contents[2].quantity).isEqualTo(3);
+    // BADQTY has a present but invalid quantity: the item is dropped, never sent as 1.
+    assertThat(capturedBody.event_data.contents).isEqualTo([
+      { id: 'NOQTY', unit_price: 10, quantity: 1 },
+      { id: 'STRQTY', unit_price: 10, quantity: 3 }
+    ]);
 
 - name: Auto-map joins item_category through item_category5 with pipe separator (v221 automap-13)
   code: |-
