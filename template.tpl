@@ -22,7 +22,7 @@ ___INFO___
     "id": "seznam_sem",
     "displayName": "Seznam SEM"
   },
-  "description": "Server-side GTM tag that sends conversion events to the Seznam SEM API (rtgconv). Object or per-field mapping, optional GA4 auto-map, consent mode and sid/udid cookie fallback.",
+  "description": "Server-side GTM tag that sends conversion events to the Seznam SEM API (rtgconv). Key-value tables or objects, optional GA4 prefill, consent mode and sid/udid cookie fallback.",
   "containerContexts": [
     "SERVER"
   ],
@@ -38,7 +38,7 @@ ___TEMPLATE_PARAMETERS___
     "name": "eventNameSelect",
     "displayName": "Event Name",
     "selectItems": [
-      { "value": "auto", "displayValue": "Auto from GA4 (requires GA4 Auto-Map)" },
+      { "value": "auto", "displayValue": "Auto from GA4" },
       { "value": "PageView", "displayValue": "PageView" },
       { "value": "ViewContent", "displayValue": "ViewContent" },
       { "value": "Purchase", "displayValue": "Purchase" },
@@ -61,7 +61,7 @@ ___TEMPLATE_PARAMETERS___
     ],
     "simpleValueType": true,
     "defaultValue": "PageView",
-    "help": "Select a Seznam event name, choose 'From variable' to wire a GTM variable that resolves to a supported Seznam event name, or 'Auto from GA4' to derive the name from the inbound GA4 event_name (requires GA4 Auto-Map enabled below).",
+    "help": "Seznam event to send. 'Auto from GA4' maps the inbound GA4 event_name one-to-one (page_view, view_item, search, view_search_results, add_to_cart, add_to_wishlist, begin_checkout, add_payment_info, purchase, generate_lead, sign_up, subscribe, contact), whether or not GA4 prefill is on; any other GA4 event fails the tag. 'From variable' uses the variable below.",
     "valueValidators": [{ "type": "NON_EMPTY" }]
   },
   {
@@ -69,14 +69,8 @@ ___TEMPLATE_PARAMETERS___
     "name": "eventNameFromVariable",
     "displayName": "Event Name from Variable",
     "simpleValueType": true,
-    "help": "Assign a GTM variable that resolves to one of the 18 supported Seznam event names (PageView, ViewContent, Purchase, Contact, AddToCart, AddToWishlist, InitiateCheckout, AddPaymentInfo, Search, CompleteRegistration, Lead, Subscribe, CustomizeProduct, Donate, FindLocation, Schedule, StartTrial, SubmitApplication). Values outside this allowlist log a WARN and fail the tag under 'Strict Event Validation'. Custom (non-allowlist) event names are NOT supported by Seznam.",
-    "enablingConditions": [
-      {
-        "paramName": "eventNameSelect",
-        "paramValue": "from_variable",
-        "type": "EQUALS"
-      }
-    ],
+    "help": "A variable that returns one of the 18 Seznam event names. Any other value fails the tag.",
+    "enablingConditions": [{ "paramName": "eventNameSelect", "paramValue": "from_variable", "type": "EQUALS" }],
     "valueValidators": [{ "type": "NON_EMPTY" }]
   },
   {
@@ -84,95 +78,179 @@ ___TEMPLATE_PARAMETERS___
     "name": "semId",
     "displayName": "S2S SEM ID (Sklik)",
     "simpleValueType": true,
-    "help": "Your S2S SEM ID — visible in Sklik account settings under 'Show advanced settings'. This is a SEPARATE identifier from the SEM ID used by the frontend sul.js script. Required for S2S tracking. Must be 24 characters of 0-9 and a-z; any other value fails the tag under 'Strict Event Validation' and logs a warning otherwise.",
-    "valueValidators": [
-      {
-        "type": "NON_EMPTY"
-      }
-    ]
-  },
-  {
-    "type": "SELECT",
-    "name": "eventSource",
-    "displayName": "Event Source",
-    "selectItems": [
-      {
-        "value": "web",
-        "displayValue": "Web"
-      },
-      {
-        "value": "app",
-        "displayValue": "App"
-      }
-    ],
-    "simpleValueType": true,
-    "defaultValue": "web",
-    "help": "Source of the event — web or app."
+    "help": "S2S SEM ID from Sklik → Správa měření → Zobrazit pokročilé nastavení. It is not the SEM ID in sul.js. 24 characters of 0-9 and a-z; any other value fails the tag. Variables and lookup tables are allowed.",
+    "valueValidators": [{ "type": "NON_EMPTY" }]
   },
   {
     "type": "TEXT",
     "name": "eventUrl",
     "displayName": "Event URL (optional)",
     "simpleValueType": true,
-    "help": "Page URL for the event. Falls back to the Referer header if left empty."
+    "help": "Page URL. Empty: GA4 page_location (with GA4 prefill), else the Referer header."
   },
   {
     "type": "TEXT",
     "name": "eventId",
     "displayName": "Event ID (optional)",
     "simpleValueType": true,
-    "help": "Unique event ID for deduplication. To dedupe across frontend and server tracking, the SAME event_id MUST be used on both sides. For Purchase events, frontend tracking commonly uses 'Purchase__' + order_id when no explicit event ID is set — to align, use the same value (or a shared variable) here."
-  },
-  {
-    "type": "TEXT",
-    "name": "eventTime",
-    "displayName": "Event Time (optional)",
-    "simpleValueType": true,
-    "help": "Event timestamp in milliseconds. Seconds input is auto-upscaled to ms and fractional milliseconds are rounded. Falls back to server time if empty; a value that is not a positive number (0, negative, non-numeric) also falls back to server time, with a warning."
+    "help": "Event ID shared with frontend tracking for deduplication, for example 'Purchase__' + order ID. The template does not derive it."
   },
   {
     "type": "GROUP",
     "name": "autoMapGroup",
-    "displayName": "GA4 Auto-Map (opt-in)",
+    "displayName": "GA4 prefill",
     "groupStyle": "ZIPPY_CLOSED",
     "subParams": [
       {
         "type": "CHECKBOX",
         "name": "enableGa4AutoMap",
-        "checkboxText": "Enable GA4 auto-map",
+        "checkboxText": "Prefill from GA4 event data",
         "simpleValueType": true,
         "defaultValue": false,
-        "help": "Reads inbound GA4 event and pre-fills SEM event_data, contents, event_url, event_id, and hashed sha256_* user_data only. Raw PII (email/phone/name/address) is never auto-forwarded — the template does not hash. Explicit fields below always override (Layer 0 precedence). Consent is not auto-mapped: map the Consent Mode Object on this tag too. Off by default to preserve v2.0 GA4 decoupling."
-      },
-      {
-        "type": "CHECKBOX",
-        "name": "autoMapEventName",
-        "checkboxText": "Auto-map event name (when Event Name is \"Auto from GA4\")",
-        "simpleValueType": true,
-        "defaultValue": false,
-        "enablingConditions": [
-          { "paramName": "enableGa4AutoMap", "paramValue": true, "type": "EQUALS" }
-        ]
+        "help": "Prefill event and user data from the inbound GA4 event (standard GA4 keys; user data only from hashed sha256_* fields). The objects, the tables and legacy fields override the prefill. Consent is never prefilled: map the Consent Mode Object on this tag too."
       },
       {
         "type": "CHECKBOX",
         "name": "autoMapUserData",
-        "checkboxText": "Auto-map hashed user_data (sha256_* only)",
+        "checkboxText": "Prefill user data",
         "simpleValueType": true,
         "defaultValue": true,
-        "enablingConditions": [
-          { "paramName": "enableGa4AutoMap", "paramValue": true, "type": "EQUALS" }
-        ]
+        "enablingConditions": [{ "paramName": "enableGa4AutoMap", "paramValue": true, "type": "EQUALS" }],
+        "help": "Map GA4 user_data.sha256_* to em, ph, fn and ln. Uncheck to exclude user data from the prefill."
       },
       {
         "type": "CHECKBOX",
         "name": "autoMapEventData",
-        "checkboxText": "Auto-map event_data + contents",
+        "checkboxText": "Prefill event data",
         "simpleValueType": true,
         "defaultValue": true,
-        "enablingConditions": [
-          { "paramName": "enableGa4AutoMap", "paramValue": true, "type": "EQUALS" }
-        ]
+        "enablingConditions": [{ "paramName": "enableGa4AutoMap", "paramValue": true, "type": "EQUALS" }],
+        "help": "Map currency, value, transaction_id, tax, shipping, shipping_tier, payment_type, search_term and items. Uncheck to exclude event data from the prefill."
+      }
+    ]
+  },
+  {
+    "type": "GROUP",
+    "name": "eventDataGroup",
+    "displayName": "Event data",
+    "groupStyle": "ZIPPY_CLOSED",
+    "subParams": [
+      {
+        "type": "TEXT",
+        "name": "eventDataObject",
+        "displayName": "Event Data Object",
+        "simpleValueType": true,
+        "help": "Optional variable (object or JSON string) with Seznam event_data keys. Unknown keys are dropped with a warning."
+      },
+      {
+        "type": "SIMPLE_TABLE",
+        "name": "eventDataTable",
+        "displayName": "Event data rows",
+        "simpleTableColumns": [
+          {
+            "defaultValue": "",
+            "displayName": "Key",
+            "name": "key",
+            "type": "SELECT",
+            "macrosInSelect": false,
+            "isUnique": true,
+            "selectItems": [
+              { "value": "sznaiid", "displayValue": "sznaiid" },
+              { "value": "order_id", "displayValue": "order_id" },
+              { "value": "currency", "displayValue": "currency (CZK)" },
+              { "value": "value", "displayValue": "value (without VAT)" },
+              { "value": "value_tax", "displayValue": "value_tax" },
+              { "value": "content_type", "displayValue": "content_type" },
+              { "value": "contents", "displayValue": "contents (array or JSON)" },
+              { "value": "delivery_price", "displayValue": "delivery_price (with VAT)" },
+              { "value": "delivery_type", "displayValue": "delivery_type" },
+              { "value": "payment_type", "displayValue": "payment_type" },
+              { "value": "other_costs", "displayValue": "other_costs (with VAT)" },
+              { "value": "predicted_ltv", "displayValue": "predicted_ltv" },
+              { "value": "review_email", "displayValue": "review_email (plain text, Zboží)" },
+              { "value": "product_ids", "displayValue": "product_ids (array or JSON)" },
+              { "value": "goods_intention", "displayValue": "goods_intention" },
+              { "value": "goods_phase", "displayValue": "goods_phase" },
+              { "value": "search_string", "displayValue": "search_string" },
+              { "value": "status", "displayValue": "status (true/false)" }
+            ],
+            "valueValidators": [{ "type": "NON_EMPTY" }]
+          },
+          {
+            "defaultValue": "",
+            "displayName": "Value",
+            "name": "value",
+            "type": "TEXT"
+          }
+        ],
+        "newRowButtonText": "Add row",
+        "help": "One row per event_data key; rows override the object. Values are converted to the Seznam types: numbers, IDs as strings, status as true/false, contents and product_ids as arrays or JSON strings. value is without VAT; unit_price, delivery_price and other_costs include VAT; currency is CZK."
+      }
+    ]
+  },
+  {
+    "type": "GROUP",
+    "name": "userDataGroup",
+    "displayName": "User data",
+    "groupStyle": "ZIPPY_CLOSED",
+    "subParams": [
+      {
+        "type": "TEXT",
+        "name": "userDataObject",
+        "displayName": "User Data Object",
+        "simpleValueType": true,
+        "help": "Optional variable (object or JSON string) with Seznam user_data keys. All PII must already be SHA-256 hashed on the frontend; the template never hashes. sid and udid are sent unhashed."
+      },
+      {
+        "type": "SIMPLE_TABLE",
+        "name": "userDataTable",
+        "displayName": "User data rows",
+        "simpleTableColumns": [
+          {
+            "defaultValue": "",
+            "displayName": "Key",
+            "name": "key",
+            "type": "SELECT",
+            "macrosInSelect": false,
+            "isUnique": true,
+            "selectItems": [
+              { "value": "em", "displayValue": "em (SHA-256)" },
+              { "value": "ph", "displayValue": "ph (SHA-256)" },
+              { "value": "fn", "displayValue": "fn (SHA-256)" },
+              { "value": "ln", "displayValue": "ln (SHA-256)" },
+              { "value": "ge", "displayValue": "ge (SHA-256)" },
+              { "value": "db", "displayValue": "db (SHA-256)" },
+              { "value": "ct", "displayValue": "ct (SHA-256)" },
+              { "value": "region", "displayValue": "region (SHA-256)" },
+              { "value": "zp", "displayValue": "zp (SHA-256)" },
+              { "value": "sr", "displayValue": "sr (SHA-256)" },
+              { "value": "country", "displayValue": "country (SHA-256)" },
+              { "value": "said", "displayValue": "said" },
+              { "value": "id5", "displayValue": "id5" },
+              { "value": "secid", "displayValue": "secid" },
+              { "value": "subscription_id", "displayValue": "subscription_id" },
+              { "value": "sid", "displayValue": "sid" },
+              { "value": "udid", "displayValue": "udid" }
+            ],
+            "valueValidators": [{ "type": "NON_EMPTY" }]
+          },
+          {
+            "defaultValue": "",
+            "displayName": "Value",
+            "name": "value",
+            "type": "TEXT"
+          }
+        ],
+        "newRowButtonText": "Add row",
+        "help": "One row per user_data key; rows override the object. em, ph, fn, ln, ge, db, ct, region, zp, sr and country must be SHA-256 hex strings produced on the frontend. sid, udid and subscription_id are sent as given; sid and udid are shape-checked."
+      },
+      {
+        "type": "CHECKBOX",
+        "name": "autoMapIdsFromCookies",
+        "checkboxText": "Auto-map sid & udid from request cookies (fallback)",
+        "simpleValueType": true,
+        "defaultValue": true,
+        "help": "When on, sid and udid are read from the inbound request cookies ('sid', 'udid') as a LOWEST-priority fallback — only when not already provided by the SID/UDID fields, User Data Object, or overrides, or when the provided value is malformed. Explicit and cookie values pass the same shape check. The 'udid' cookie's '<uuid>@<timestamp>' suffix is stripped to the canonical uuid. The 'sid' cookie value contains '=' but is read whole. Note: Seznam SID is NEVER taken from GA4 event_data, because GA4's 'sid' query param is the GA4 session id, not the Seznam SID. Requires same-site (first-party) SGTM so cookies reach the server. Safari's ITP deletes cookies created in JavaScript, which includes sid and udid, after 7 days without user interaction with the website (webkit.org/tracking-prevention)."
       }
     ]
   },
@@ -200,478 +278,66 @@ ___TEMPLATE_PARAMETERS___
   },
   {
     "type": "GROUP",
-    "name": "userDataGroup",
-    "displayName": "User Data",
+    "name": "advancedGroup",
+    "displayName": "Advanced",
     "groupStyle": "ZIPPY_CLOSED",
     "subParams": [
-      {
-        "type": "SELECT",
-        "name": "userDataInputMode",
-        "displayName": "User Data input mode",
-        "macrosInSelect": false,
-        "selectItems": [
-          { "value": "object", "displayValue": "Object variable" },
-          { "value": "fields", "displayValue": "Individual fields" }
-        ],
-        "simpleValueType": true,
-        "defaultValue": "object",
-        "help": "Choose how to provide user data. 'Object variable': one GTM variable resolving to an object with SEM-native keys. 'Individual fields': map each field separately. Both produce the same payload; the cookie sid/udid fallback below applies to either mode."
-      },
-      {
-        "type": "TEXT",
-        "name": "userDataObject",
-        "displayName": "User Data Object",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "object", "type": "EQUALS" }
-        ],
-        "help": "A GTM variable resolving to an object with user data fields. SEM-native keys (em, ph, fn, ln, ge, db, ct, region, zp, sr, country, subscription_id, sid, udid) are used as-is. Frontend-template aliases (email, phone, fname, lname, gender / g, birth / birthDate, postalCode / zip, subscription / subscriptionId) are translated to canonical names with a WARN log. Other keys, including GA4-shaped keys (email_address, phone_number, nested address), are dropped with a warning. All PII values must already be SHA-256 hashed — the server template never hashes."
-      },
-      {
-        "type": "TEXT",
-        "name": "sid",
-        "displayName": "SID (Seznam Identity)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Seznam SID cookie value — primary user identifier for S2S. Obtain via window.sznIVA.IS.getIdentity('sid') after loading sul.js, or leave empty to use the cookie fallback below. The value must have the sul.js shape id=…|t=…|te=…|c=<32 characters>; a malformed value is ignored with a warning and the cookie fallback can fill it."
-      },
-      {
-        "type": "TEXT",
-        "name": "userUdid",
-        "displayName": "UDID (udid)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Unique user/device ID. Server-side template does not hash this value. If left empty and 'Auto-map sid & udid from request cookies' is on, it is read from the 'udid' cookie (the '<uuid>@<timestamp>' suffix is stripped to the canonical uuid). The value must be a UUID; a '@<timestamp>' suffix is stripped here too, and a malformed value is ignored with a warning so the cookie fallback can fill it."
-      },
-      {
-        "type": "TEXT",
-        "name": "userEmail",
-        "displayName": "Email (em)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of the normalized email (lowercase + trim). Hashing must be done on the frontend — the server-side template does not hash."
-      },
-      {
-        "type": "TEXT",
-        "name": "userPhone",
-        "displayName": "Phone (ph)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of the phone in E.164 format (e.g. +420606666666). Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userFirstName",
-        "displayName": "First Name (fn)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of the normalized first name (lowercase + trim). Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userLastName",
-        "displayName": "Last Name (ln)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of the normalized last name (lowercase + trim). Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userGender",
-        "displayName": "Gender (ge)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of 'm' / 'f' / 'o'. Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userDob",
-        "displayName": "Date of Birth (db)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of YYYYMMDD. Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userCity",
-        "displayName": "City (ct)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of the normalized city (lowercase + trim). Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userRegion",
-        "displayName": "Region / State (region)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of the normalized region/state (lowercase + trim). Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userZip",
-        "displayName": "Postal Code (zp)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of the trimmed ZIP/postal code. Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userStreet",
-        "displayName": "Street (sr)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of the normalized street (lowercase + trim). Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userCountry",
-        "displayName": "Country",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Expected SHA-256 hash of ISO 3166-1 alpha-2 code (lowercase). Hashing must be done on the frontend."
-      },
-      {
-        "type": "TEXT",
-        "name": "userSubscriptionId",
-        "displayName": "Subscription ID",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "userDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "CHECKBOX",
-        "name": "autoMapIdsFromCookies",
-        "checkboxText": "Auto-map sid & udid from request cookies (fallback)",
-        "simpleValueType": true,
-        "defaultValue": true,
-        "help": "When on, sid and udid are read from the inbound request cookies ('sid', 'udid') as a LOWEST-priority fallback — only when not already provided by the SID/UDID fields, User Data Object, or overrides, or when the provided value is malformed. Explicit and cookie values pass the same shape check. The 'udid' cookie's '<uuid>@<timestamp>' suffix is stripped to the canonical uuid. The 'sid' cookie value contains '=' but is read whole. Note: Seznam SID is NEVER taken from GA4 event_data, because GA4's 'sid' query param is the GA4 session id, not the Seznam SID. Requires same-site (first-party) SGTM so cookies reach the server. Safari's ITP deletes cookies created in JavaScript, which includes sid and udid, after 7 days without user interaction with the website (webkit.org/tracking-prevention)."
-      }
-    ]
-  },
-  {
-    "type": "GROUP",
-    "name": "eventDataGroup",
-    "displayName": "Event Data",
-    "groupStyle": "ZIPPY_CLOSED",
-    "subParams": [
-      {
-        "type": "SELECT",
-        "name": "eventDataInputMode",
-        "displayName": "Event Data input mode",
-        "macrosInSelect": false,
-        "selectItems": [
-          { "value": "object", "displayValue": "Object variable" },
-          { "value": "fields", "displayValue": "Individual fields" }
-        ],
-        "simpleValueType": true,
-        "defaultValue": "object",
-        "help": "Choose how to provide event data. 'Object variable': one GTM variable resolving to an object with event_data keys (currency, value, order_id, contents, etc.). 'Individual fields': map each field separately. Both produce the same payload."
-      },
-      {
-        "type": "TEXT",
-        "name": "eventDataObject",
-        "displayName": "Event Data Object",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "object", "type": "EQUALS" }
-        ],
-        "help": "A GTM variable resolving to an object with event data fields (currency, value, order_id, value_tax, delivery_price, content_type, contents, etc.). Keys outside the Seznam event_data schema are dropped with a warning. Values are converted to their wire types; a missing value (undefined, null, empty) does not override a GA4 Auto-Map value."
-      },
-      {
-        "type": "TEXT",
-        "name": "sznaiid",
-        "displayName": "sznaiid (click-through ID)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "currency",
-        "displayName": "Currency",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "value",
-        "displayName": "Value",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "orderId",
-        "displayName": "Order ID",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "contentType",
-        "displayName": "Content Type",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "contents",
-        "displayName": "Contents (array variable or JSON string)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Assign a GTM variable resolving to an array of SEM-native content objects [{id, quantity, unit_price, content_name, content_category}], or a JSON string in the same shape. A missing quantity is sent as 1; an item whose quantity is not a whole number of at least 1 is dropped with a warning. When contents is present, content_type is required by SEM; if omitted, this template defaults it to product. This field does not convert GA4 items[]; GA4 Auto-Map does that."
-      },
-      {
-        "type": "TEXT",
-        "name": "deliveryPrice",
-        "displayName": "Delivery Price",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "deliveryType",
-        "displayName": "Delivery Type",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "paymentType",
-        "displayName": "Payment Type",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "otherCosts",
-        "displayName": "Other Costs",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "predictedLtv",
-        "displayName": "Predicted LTV",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ]
-      },
-      {
-        "type": "TEXT",
-        "name": "valueTax",
-        "displayName": "Value Tax (value_tax)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Tax portion of value. Numeric."
-      },
-      {
-        "type": "TEXT",
-        "name": "reviewEmail",
-        "displayName": "Review Email (review_email, UNHASHED)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Zboží.cz satisfaction survey email. MUST be sent as plain text, NOT hashed. Only send with user consent."
-      },
-      {
-        "type": "TEXT",
-        "name": "productIds",
-        "displayName": "Product IDs (product_ids, array)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "GTM variable resolving to an array of Zboží.cz product IDs (non-negative integers), or JSON string. Non-integer or negative entries are skipped with a warning."
-      },
-      {
-        "type": "TEXT",
-        "name": "goodsIntention",
-        "displayName": "Goods Intention (goods_intention)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "User intent weight. Numeric."
-      },
-      {
-        "type": "TEXT",
-        "name": "goodsPhase",
-        "displayName": "Goods Phase (goods_phase)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "User interest phase. Integer — non-integer values are omitted with a warning."
-      },
-      {
-        "type": "TEXT",
-        "name": "searchString",
-        "displayName": "Search String (search_string)",
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Search query text (e.g. for Search event)."
-      },
-      {
-        "type": "CHECKBOX",
-        "name": "statusEnabled",
-        "checkboxText": "Include status field",
-        "simpleValueType": true,
-        "defaultValue": false,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" }
-        ],
-        "help": "Enable this to include a boolean status in event_data. Needed because false is a legitimate value — a plain checkbox could not distinguish it from 'not set'."
-      },
-      {
-        "type": "SELECT",
-        "name": "status",
-        "displayName": "Status (bool)",
-        "selectItems": [
-          { "value": "true",  "displayValue": "true" },
-          { "value": "false", "displayValue": "false" }
-        ],
-        "simpleValueType": true,
-        "enablingConditions": [
-          { "paramName": "eventDataInputMode", "paramValue": "fields", "type": "EQUALS" },
-          { "paramName": "statusEnabled", "paramValue": true, "type": "EQUALS" }
-        ],
-        "help": "Registration/subscription status. Boolean — both true and false are legitimate values."
-      }
-    ]
-  },
-  {
-    "type": "GROUP",
-    "name": "settingsGroup",
-    "displayName": "Settings",
-    "groupStyle": "ZIPPY_CLOSED",
-    "subParams": [
-      {
-        "type": "CHECKBOX",
-        "name": "testMode",
-        "checkboxText": "Enable Test Mode",
-        "simpleValueType": true,
-        "defaultValue": false,
-        "help": "Enables verbose logging of full payloads and responses. Events are still sent normally."
-      },
-      {
-        "type": "CHECKBOX",
-        "name": "useOptimisticScenario",
-        "checkboxText": "Use Optimistic Scenario",
-        "simpleValueType": true,
-        "defaultValue": true,
-        "help": "Returns success to GTM immediately without waiting for the API response. Warning: 4xx/5xx responses and failed requests are logged as errors but GTM still reports success. Disable for higher observability during rollout or for critical conversion tags. The request times out after 5 seconds."
-      },
-      {
-        "type": "CHECKBOX",
-        "name": "strictEventValidation",
-        "checkboxText": "Strict Event Validation",
-        "simpleValueType": true,
-        "defaultValue": false,
-        "help": "When enabled, unknown event names, a SEM ID that is not 24 characters of 0-9 and a-z, and invalid JSON in the user/event data object, contents and product ID fields cause the tag to fail (and call gtmOnFailure) instead of just logging. Recommended for production hardening. When disabled, such issues are logged but the tag reports success. A malformed consent configuration always fails the tag, regardless of this setting."
-      },
       {
         "type": "CHECKBOX",
         "name": "sendS2sHeaders",
         "checkboxText": "Send S2S Headers (consent-gated)",
         "simpleValueType": true,
         "defaultValue": true,
-        "help": "When enabled, forwards client IP address, User-Agent, and Client Hints (sec-ch-ua) to Seznam for device targeting and analytics. These headers are only sent when ad_storage and ad_user_data consent are both 'granted'. Disable to never send these headers regardless of consent."
-      }
-    ]
-  },
-  {
-    "type": "GROUP",
-    "name": "serverCookiesGroup",
-    "displayName": "Server Cookies",
-    "groupStyle": "ZIPPY_CLOSED",
-    "subParams": [
+        "help": "Send client IP, User-Agent and Client Hints when consent_mode ad_storage and ad_user_data are both granted. IP and User-Agent come from the GA4 client event data (ip_override, user_agent), with the request headers as fallback."
+      },
       {
         "type": "CHECKBOX",
         "name": "persistSznaiidCookie",
         "checkboxText": "Persist sznaiid as first-party cookie",
         "simpleValueType": true,
         "defaultValue": true,
-        "help": "When enabled, reads sznaiid from URL (?sznaiid=...) and stores it as a 1P cookie named 'sznaiid'. Read on subsequent events when event_data.sznaiid is otherwise empty. Consent-free per Seznam docs (technical click ID, not PII). Disabling cookie persistence does NOT disable URL-based capture — sznaiid extracted from the URL is still injected into event_data.sznaiid."
+        "help": "Store the Sklik click ID (?sznaiid=) in a first-party cookie. The latest click wins; lifetime 30 days. Without the cookie the click ID is still read from the URL."
+      },
+      {
+        "type": "CHECKBOX",
+        "name": "useOptimisticScenario",
+        "checkboxText": "Report success before Seznam answers",
+        "simpleValueType": true,
+        "defaultValue": false,
+        "help": "Off: the tag status reflects Seznam's HTTP response (timeout 5 s). On: the tag reports success immediately, and HTTP errors are only logged."
       },
       {
         "type": "SELECT",
-        "name": "persistSznaiidCookieMode",
-        "displayName": "Cookie write strategy",
+        "name": "eventSource",
+        "displayName": "Event Source",
         "selectItems": [
-          { "value": "first_touch", "displayValue": "First touch (write only if no cookie exists)" },
-          { "value": "last_touch",  "displayValue": "Last touch (overwrite on every URL hit)" }
+          { "value": "web", "displayValue": "Web" },
+          { "value": "app", "displayValue": "App" }
         ],
         "simpleValueType": true,
-        "defaultValue": "first_touch",
-        "enablingConditions": [
-          { "paramName": "persistSznaiidCookie", "paramValue": true, "type": "EQUALS" }
-        ]
+        "defaultValue": "web",
+        "help": "Source of the event — web or app."
       },
       {
         "type": "TEXT",
-        "name": "sznaiidCookieMaxAge",
-        "displayName": "Cookie max-age (seconds)",
+        "name": "eventTime",
+        "displayName": "Event Time (optional)",
         "simpleValueType": true,
-        "defaultValue": "7776000",
-        "valueValidators": [{ "type": "POSITIVE_NUMBER" }],
-        "enablingConditions": [
-          { "paramName": "persistSznaiidCookie", "paramValue": true, "type": "EQUALS" }
+        "help": "Event timestamp in milliseconds. Seconds input is auto-upscaled to ms and fractional milliseconds are rounded. Falls back to server time if empty; a value that is not a positive number (0, negative, non-numeric) also falls back to server time, with a warning."
+      },
+      {
+        "type": "SELECT",
+        "name": "logType",
+        "displayName": "Console logging",
+        "macrosInSelect": false,
+        "selectItems": [
+          { "value": "no", "displayValue": "Do not log" },
+          { "value": "debug", "displayValue": "Preview and debug only" },
+          { "value": "always", "displayValue": "Always" }
         ],
-        "help": "Default 7776000 (90 days)."
+        "simpleValueType": true,
+        "defaultValue": "debug",
+        "help": "Console logging of warnings and diagnostic lines. ERROR lines are always logged. 'debug' logs only in Preview and debug mode."
       }
     ]
   },
@@ -718,61 +384,363 @@ ___TEMPLATE_PARAMETERS___
             "valueValidators": [{ "type": "NON_EMPTY" }]
           }
         ],
-        "enablingConditions": [
-          {
-            "paramName": "bigQueryLogType",
-            "paramValue": "always",
-            "type": "EQUALS"
-          }
-        ]
+        "enablingConditions": [{ "paramName": "bigQueryLogType", "paramValue": "always", "type": "EQUALS" }]
       }
     ]
   },
   {
     "type": "GROUP",
-    "name": "advancedOverridesGroup",
-    "displayName": "Advanced Overrides",
+    "name": "legacyGroup",
+    "displayName": "Starší pole (v2.x)",
     "groupStyle": "ZIPPY_CLOSED",
     "subParams": [
       {
-        "type": "SIMPLE_TABLE",
-        "name": "userDataOverrides",
-        "displayName": "User Data Overrides",
-        "simpleTableColumns": [
+        "type": "GROUP",
+        "name": "legacyUserDataGroup",
+        "displayName": "User data (v2.x)",
+        "groupStyle": "ZIPPY_CLOSED",
+        "subParams": [
           {
-            "defaultValue": "",
-            "displayName": "Property Name",
-            "name": "name",
-            "type": "TEXT"
+            "type": "TEXT",
+            "name": "sid",
+            "displayName": "(v2.x) SID (Seznam Identity)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `sid` and clear this field."
           },
           {
-            "defaultValue": "",
-            "displayName": "Property Value",
-            "name": "value",
-            "type": "TEXT"
+            "type": "TEXT",
+            "name": "userUdid",
+            "displayName": "(v2.x) UDID (udid)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `udid` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userEmail",
+            "displayName": "(v2.x) Email (em)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `em` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userPhone",
+            "displayName": "(v2.x) Phone (ph)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `ph` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userFirstName",
+            "displayName": "(v2.x) First Name (fn)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `fn` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userLastName",
+            "displayName": "(v2.x) Last Name (ln)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `ln` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userGender",
+            "displayName": "(v2.x) Gender (ge)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `ge` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userDob",
+            "displayName": "(v2.x) Date of Birth (db)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `db` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userCity",
+            "displayName": "(v2.x) City (ct)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `ct` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userRegion",
+            "displayName": "(v2.x) Region / State (region)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `region` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userZip",
+            "displayName": "(v2.x) Postal Code (zp)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `zp` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userStreet",
+            "displayName": "(v2.x) Street (sr)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `sr` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userCountry",
+            "displayName": "(v2.x) Country",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `country` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "userSubscriptionId",
+            "displayName": "(v2.x) Subscription ID",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the User data table row `subscription_id` and clear this field."
+          },
+          {
+            "type": "SIMPLE_TABLE",
+            "name": "userDataOverrides",
+            "displayName": "(v2.x) User Data Overrides",
+            "simpleTableColumns": [
+              {
+                "defaultValue": "",
+                "displayName": "Property Name",
+                "name": "name",
+                "type": "TEXT"
+              },
+              {
+                "defaultValue": "",
+                "displayName": "Property Value",
+                "name": "value",
+                "type": "TEXT"
+              }
+            ],
+            "help": "Deprecated v2.x table. It still works in v3. Move its rows to the User data table (same keys) and delete them here."
           }
-        ],
-        "help": "Catch-all override table for user data fields. Overrides both the object variable and individual fields above. Property names must be Seznam user_data keys; other names are dropped with a warning. Rows with an empty value are ignored."
+        ]
       },
       {
-        "type": "SIMPLE_TABLE",
-        "name": "eventDataOverrides",
-        "displayName": "Event Data Overrides",
-        "simpleTableColumns": [
+        "type": "GROUP",
+        "name": "legacyEventDataGroup",
+        "displayName": "Event data (v2.x)",
+        "groupStyle": "ZIPPY_CLOSED",
+        "subParams": [
           {
-            "defaultValue": "",
-            "displayName": "Property Name",
-            "name": "name",
-            "type": "TEXT"
+            "type": "TEXT",
+            "name": "sznaiid",
+            "displayName": "(v2.x) sznaiid (click-through ID)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `sznaiid` and clear this field."
           },
           {
-            "defaultValue": "",
-            "displayName": "Property Value",
+            "type": "TEXT",
+            "name": "currency",
+            "displayName": "(v2.x) Currency",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `currency` and clear this field."
+          },
+          {
+            "type": "TEXT",
             "name": "value",
-            "type": "TEXT"
+            "displayName": "(v2.x) Value",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `value` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "orderId",
+            "displayName": "(v2.x) Order ID",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `order_id` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "contentType",
+            "displayName": "(v2.x) Content Type",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `content_type` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "contents",
+            "displayName": "(v2.x) Contents (array variable or JSON string)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `contents` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "deliveryPrice",
+            "displayName": "(v2.x) Delivery Price",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `delivery_price` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "deliveryType",
+            "displayName": "(v2.x) Delivery Type",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `delivery_type` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "paymentType",
+            "displayName": "(v2.x) Payment Type",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `payment_type` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "otherCosts",
+            "displayName": "(v2.x) Other Costs",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `other_costs` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "predictedLtv",
+            "displayName": "(v2.x) Predicted LTV",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `predicted_ltv` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "valueTax",
+            "displayName": "(v2.x) Value Tax (value_tax)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `value_tax` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "reviewEmail",
+            "displayName": "(v2.x) Review Email (review_email, UNHASHED)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `review_email` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "productIds",
+            "displayName": "(v2.x) Product IDs (product_ids, array)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `product_ids` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "goodsIntention",
+            "displayName": "(v2.x) Goods Intention (goods_intention)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `goods_intention` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "goodsPhase",
+            "displayName": "(v2.x) Goods Phase (goods_phase)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `goods_phase` and clear this field."
+          },
+          {
+            "type": "TEXT",
+            "name": "searchString",
+            "displayName": "(v2.x) Search String (search_string)",
+            "simpleValueType": true,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `search_string` and clear this field."
+          },
+          {
+            "type": "CHECKBOX",
+            "name": "statusEnabled",
+            "checkboxText": "(v2.x) Include status field",
+            "simpleValueType": true,
+            "defaultValue": false,
+            "help": "Deprecated v2.x field. It still works in v3. Move it to the Event data table row `status` and uncheck it."
+          },
+          {
+            "type": "SELECT",
+            "name": "status",
+            "displayName": "(v2.x) Status (bool)",
+            "selectItems": [
+              { "value": "true", "displayValue": "true" },
+              { "value": "false", "displayValue": "false" }
+            ],
+            "simpleValueType": true,
+            "enablingConditions": [{ "paramName": "statusEnabled", "paramValue": true, "type": "EQUALS" }],
+            "help": "Deprecated v2.x field. It still works in v3 while Include status is checked. Move it to the Event data table row `status` and uncheck Include status."
+          },
+          {
+            "type": "SIMPLE_TABLE",
+            "name": "eventDataOverrides",
+            "displayName": "(v2.x) Event Data Overrides",
+            "simpleTableColumns": [
+              {
+                "defaultValue": "",
+                "displayName": "Property Name",
+                "name": "name",
+                "type": "TEXT"
+              },
+              {
+                "defaultValue": "",
+                "displayName": "Property Value",
+                "name": "value",
+                "type": "TEXT"
+              }
+            ],
+            "help": "Deprecated v2.x table. It still works in v3. Move its rows to the Event data table (same keys) and delete them here."
           }
-        ],
-        "help": "Catch-all override table for event data fields. Values are converted to the wire type of their key (numbers for value, value_tax, delivery_price, other_costs, predicted_ltv, goods_intention, goods_phase; true/false for status). Unknown property names and invalid values are dropped with a warning. Rows with an empty value are ignored; false and 0 are values. sem_id always comes from the S2S SEM ID field."
+        ]
+      },
+      {
+        "type": "GROUP",
+        "name": "legacySettingsGroup",
+        "displayName": "Settings (v2.x)",
+        "groupStyle": "ZIPPY_CLOSED",
+        "subParams": [
+          {
+            "type": "CHECKBOX",
+            "name": "autoMapEventName",
+            "checkboxText": "(v2.x) Auto-map event name (when Event Name is \"Auto from GA4\")",
+            "simpleValueType": true,
+            "defaultValue": false,
+            "enablingConditions": [{ "paramName": "enableGa4AutoMap", "paramValue": true, "type": "EQUALS" }],
+            "help": "Deprecated: 'Auto from GA4' in Event Name alone enables the mapping. Ignored."
+          },
+          {
+            "type": "CHECKBOX",
+            "name": "testMode",
+            "checkboxText": "(v2.x) Enable Test Mode",
+            "simpleValueType": true,
+            "defaultValue": false,
+            "help": "Deprecated: while checked, Console logging is forced to 'always'. Choose a Console logging level, then uncheck."
+          },
+          {
+            "type": "CHECKBOX",
+            "name": "strictEventValidation",
+            "checkboxText": "(v2.x) Strict Event Validation",
+            "simpleValueType": true,
+            "defaultValue": false,
+            "help": "Deprecated: v3 always stops hits with schema-invalid required data (unknown event, invalid SEM ID, incomplete Purchase). Ignored."
+          },
+          {
+            "type": "SELECT",
+            "name": "persistSznaiidCookieMode",
+            "displayName": "(v2.x) Cookie write strategy",
+            "selectItems": [
+              { "value": "first_touch", "displayValue": "First touch (write only if no cookie exists)" },
+              { "value": "last_touch", "displayValue": "Last touch (overwrite on every URL hit)" }
+            ],
+            "simpleValueType": true,
+            "defaultValue": "last_touch",
+            "enablingConditions": [{ "paramName": "persistSznaiidCookie", "paramValue": true, "type": "EQUALS" }],
+            "help": "Deprecated: v3 always keeps the latest click. Ignored; choose 'last_touch' to silence the warning."
+          },
+          {
+            "type": "TEXT",
+            "name": "sznaiidCookieMaxAge",
+            "displayName": "(v2.x) Cookie max-age (seconds)",
+            "simpleValueType": true,
+            "defaultValue": "",
+            "enablingConditions": [{ "paramName": "persistSznaiidCookie", "paramValue": true, "type": "EQUALS" }],
+            "help": "Deprecated: v3 uses a fixed lifetime of 30 days. Ignored; clear it to silence the warning."
+          }
+        ]
       }
     ]
   }
@@ -6009,6 +5977,11 @@ setup: |-
 
 ___NOTES___
 
+v3.0.0 — Simpler UI: key-value tables for event and user data, Console logging level (logType),
+v2.x individual fields kept in the collapsed group "Starší pole (v2.x)" and reported in one
+aggregated WARN, GA4 event names mapped 1:1, always-strict validation, sznaiid last touch with a
+fixed 30-day lifetime, IP/User-Agent from the event data first. See CHANGELOG.md and README
+"Přechod na verzi 3".
 v2.3.1 — Correctness patch: one assemble/normalize/validate pass on the final payload,
 consent validation (malformed configured consent fails the tag), invalid-quantity items
 dropped, no value derived from item prices, sid/udid shape rule for explicit values,
