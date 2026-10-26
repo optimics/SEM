@@ -25,7 +25,7 @@ Every item below changes what an existing tag sends or whether it fails. After u
    - An item whose quantity is present but not a whole number of at least 1 (`0`, negative, `0.5`, `1.9`, `'abc'`, `Infinity`) is dropped with a WARN. The other items and the event are still sent.
    - If every item is dropped, `contents` is omitted, and so is a `content_type` that the template would have generated for it.
    - Before 2.3.1, GA4 quantities were floored (`1.9` → `1`, `0.5` → `0`) and other sources were not checked.
-4. **The SEM ID is checked against `^[0-9a-z]{24}$`,** the pattern the schema requires. On a mismatch, Strict Event Validation fails the tag locally. Without Strict, the tag logs a WARN and sends the hit, with no guaranteed outcome at Seznam. The playground's 490 logged hits used a valid-format SEM ID and received `200` even without consent or sid/udid; they say nothing about a malformed ID. A `200` response alone does not establish downstream consent evaluation or attribution.
+4. **The SEM ID is checked against `^[0-9a-z]{24}$`,** the pattern the schema requires. On a mismatch, Strict Event Validation fails the tag locally. Without Strict, the tag logs a WARN and sends the hit, with no guaranteed outcome at Seznam. In the playground, hits without consent or sid/udid also received `200`. All logged hits used a valid-format SEM ID, so they say nothing about a malformed ID. A `200` response alone does not establish downstream consent evaluation or attribution.
 5. **The request times out after 5 seconds** (previously the 15 s platform default). A timeout logs `request to Seznam failed: timed_out`; it fails the tag when Use Optimistic Scenario is off.
 6. **Unknown keys are dropped with a WARN.** Keys outside the Seznam schema in `event_data`, `user_data` and `contents` items (for example GA4-shaped `email_address` or `item_id`, or a misspelled key) are no longer forwarded. Override rows with an unknown property name are dropped the same way.
 7. **Values are converted to their wire types; invalid optional values are omitted with a WARN.**
@@ -100,14 +100,14 @@ Every item below changes what an existing tag sends or whether it fails. After u
 
 2.3.1 is a compatibility-preserving patch candidate. These gates must pass before the release commit:
 
-1. One green run of the embedded test suite in a connected GTM editor, recorded with the file hash. The editor run is open: Run Tests reported a generic "Invalid input", and the latest attempt was blocked by "Unable to connect to the tag server" in the editor environment.
-2. Preview of the upgraded playground tags (17 and 20): payloads, consent behavior and `Set-Cookie`.
+1. One green run of the embedded test suite in a connected GTM editor, recorded with the file hash. **Open.** No green editor test run is recorded: in Matěj's container the editor's test runner never produced results. Attempts produced a generic "Invalid input" and/or "Unable to connect to the tag server", with timing-dependent results; the cause remains unisolated (`review/gtm-verification/p0-editor-run.md`). The Node runner reports 166/166. This gate stays open until the agreed editor run passes or Matěj explicitly changes the gate.
+2. Preview of the upgraded playground tags (17 and 20): payloads, consent behavior and `Set-Cookie`. **Partly done:** HEAD 551bb2d was verified at runtime in real sGTM: the existing tag 17 fired on the upgraded template, rtgconv answered `200`, `api.template_version` was `2.3.1`, and `sid`/`udid` came from the cookie fallback; no permission dialog appeared on import. Tag 20 (Purchase with the consent object) and the `Set-Cookie` check are still open.
 3. The README consent transport verified end to end (browser → GA4 client event data → mapped variable → outgoing `consent_mode`).
 4. The "(unreleased)" label replaced by the release date only in the release commit; `metadata.yaml` re-pinned after the push.
 
 ### Notes
 
-- Tests: 70 → 161 scenarios, with a shared `setup:` block. They cover the P0 rows of the review regression matrix and the P0 review fixes. Valid hits assert exactly one request; failures assert none.
+- Tests: 70 → 166 scenarios, with a shared `setup:` block. They cover the P0 rows of the review regression matrix and the P0 review fixes. Valid hits assert exactly one request; failures assert none.
 - The WARN for a payload without `user_ids` now states only what is observable: "no valid sid/udid/hashed PII is present; hit is sent without user_ids".
 - Items in `contents` need no particular key (the schema requires none). Whether items without `id`, `content_name` and `content_category` should be dropped is an open product decision; 2.3.1 keeps them.
 - Deliberately unchanged in 2.3.1 (planned for v3): the optimistic default, Strict Event Validation, first-touch sznaiid, the GA4 event-name map, `transaction_id` as an `event_id` fallback, the frontend-template aliases, BigQuery logging, and the pass-through of identifiers and `review_email` regardless of consent.
