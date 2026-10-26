@@ -4573,6 +4573,31 @@ scenarios:
     assertThat(sent().event_data.contents).isEqualTo([{ quantity: 2 }]);
     assertThat(logged('event_data.contents[0].item_id is not a Seznam field')).isTrue();
     assertThat(logged('event_data.contents[0].price is not a Seznam field')).isTrue();
+- name: P0 V-R2 - a placeholder userRegion falls back to userState
+  code: |-
+    runCode(tagData({ userRegion: 'null', userState: 'HASH_STATE', userEmail: 'HASH_EM' }));
+    assertThat(sent().user_ids.user_data.region).isEqualTo('HASH_STATE');
+
+- name: P0 V-R2 - a blank userRegion falls back to userState
+  code: |-
+    runCode(tagData({ userRegion: '   ', userState: 'HASH_STATE', userEmail: 'HASH_EM' }));
+    assertThat(sent().user_ids.user_data.region).isEqualTo('HASH_STATE');
+
+- name: P0 V-R2 - userRegion 0 is a value and is sent as the string 0
+  code: |-
+    runCode(tagData({ userRegion: 0, userState: 'HASH_STATE' }));
+    assertThat(sent().user_ids.user_data.region).isStrictlyEqualTo('0');
+
+- name: P0 V-R2 - a valid userRegion wins over userState
+  code: |-
+    runCode(tagData({ userRegion: 'HASH_REGION', userState: 'HASH_STATE' }));
+    assertThat(sent().user_ids.user_data.region).isEqualTo('HASH_REGION');
+
+- name: P0 V-R2 - an invalid supplied userRegion is omitted without falling back
+  code: |-
+    runCode(tagData({ userRegion: true, userState: 'HASH_STATE', userEmail: 'HASH_EM' }));
+    assertThat(sent().user_ids.user_data.region).isUndefined();
+    assertThat(logged('user_data.region: expected string or number')).isTrue();
 setup: |-
   // Sandboxed test code has no JSON, Promise or callLater globals; require them like the template does.
   const JSON = require('JSON');
