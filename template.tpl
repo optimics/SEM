@@ -937,7 +937,7 @@ const apiUrl = 'https://sem.seznam.cz/rtgconv';
 // `api.template_version` tracks our CHANGELOG release version. These are independent of the
 // GTM ___INFO___.version field, which is a GTM-internal stability flag constrained to 0 or 1.
 const API_CLIENT_VERSION = '1';
-const TEMPLATE_VERSION = '2.2.1';
+const TEMPLATE_VERSION = '2.3.1';
 
 // Parse JSON object/array fields once, up-front. `checkJsonInputs` decides severity, `buildPayload` consumes values.
 const parsed = {
@@ -3426,7 +3426,7 @@ scenarios:
       useOptimisticScenario: false
     });
     assertThat(capturedOpts.headers['X-Client-Id']).isEqualTo('gtm-server-template-seznam-sem');
-    assertThat(capturedOpts.headers['X-Client-Version']).isEqualTo('2.2.1');
+    assertThat(capturedOpts.headers['X-Client-Version']).isEqualTo('2.3.1');
 
 - name: userDataObject with FE aliases - email phone fname mapped to em ph fn (v221 alias-1)
   code: |-
@@ -4418,6 +4418,12 @@ setup: |-
 
 ___NOTES___
 
+v2.3.1 — Correctness patch: one assemble/normalize/validate pass on the final payload,
+consent validation (malformed configured consent fails the tag), invalid-quantity items
+dropped, no value derived from item prices, sid/udid shape rule for explicit values,
+full SEM ID charset check, 5 s timeout. See CHANGELOG.md, including the upgrade notes.
+v2.3.0 — sid/udid cookie fallback, Object / Individual fields input modes, rebrand to
+"Seznam SEM (Server-Side)". See CHANGELOG.md.
 v2.2.1 — Polish on v2.2 line: broadened GA4 Auto-Map (multi-source order_id /
 value / item field aliases, multi-level item_category2..5 join, MeasureHive
 slash categories, Shoptet currentCategory/defaultCategory, quantity default 1,
