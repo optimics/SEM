@@ -1,5 +1,66 @@
 # Seznam SEM (Server-Side) - Changelog
 
+## 3.0.0 (unreleased)
+
+A smaller UI on top of the 2.3.1 behavior. New tags have 21 controls plus the 4 BigQuery controls: event and user data go into an object or a **Key – Value** table whose key is picked from a list. The 40 v2.x controls stay, under their v2.3 names, in the collapsed group **Starší pole (v2.x)**; they keep working and are reported in one aggregated WARN. `X-Client-Version` and `api.template_version` report `3.0.0`. The migration guide is the README section "Přechod na verzi 3".
+
+### Upgrade notes
+
+Every item below changes what an existing tag sends, whether it fails, or what it logs. After updating, check each one that applies to your setup.
+
+1. **GA4 event names map one-to-one** (13 names: `page_view`, `view_item`, `search`, `view_search_results`, `add_to_cart`, `add_to_wishlist`, `begin_checkout`, `add_payment_info`, `purchase`, `generate_lead`, `sign_up`, `subscribe`, `contact`). `login`, `add_shipping_info`, `view_item_list`, `select_item` and `view_promotion` no longer map: the tag fails with `Unknown event name: ga4:<name>` and sends nothing. 'Auto from GA4' now maps the name whether or not GA4 prefill is on; the old *Auto-map event name* checkbox is ignored, so an Auto tag with it unchecked, which used to fail, now sends. *What to check:* tags with Event Name 'Auto from GA4' and their triggers; map the removed names with 'From variable' or separate tags.
+2. **`transaction_id` is no longer an `event_id` fallback.** `event_id` comes from the Event ID field, then GA4 `event_id`. With prefill on, no `event_id` and a `transaction_id`, the tag logs `transaction_id is no longer used as event_id; set Event ID`. *What to check:* frontend/server deduplication; set Event ID explicitly (for example `Purchase__` + order ID).
+3. **sznaiid is last touch with a fixed 30-day lifetime.** A click ID in the URL always replaces the cookie and refreshes it (`max-age` 2592000); the cookie options are otherwise unchanged. *Cookie write strategy* and *Cookie max-age* are ignored; they are reported only when they would have changed this write (stored `first_touch` with an existing cookie, or a stored lifetime other than 2592000). Cookies written with 90 days stay until a new click replaces them or they expire. *What to check:* `Set-Cookie` on a landing hit with `?sznaiid=`.
+4. **Client IP and User-Agent come from the GA4 client's event data first** (`ip_override`, `user_agent`), the request headers are the fallback; Client Hints still come from the headers, and the consent gate is unchanged. *What to check:* `s2s_headers` in the outgoing request; values behind a proxy are more accurate.
+5. **Use Optimistic Scenario is off for new tags.** The tag reports success before Seznam answers only when the stored value is `true`; existing tags keep their stored value. *What to check:* uncheck it on existing tags so the tag status reflects Seznam's response.
+6. **Timeout 5 s**, unchanged from 2.3.1. *What to check:* nothing.
+7. **Console logging (`logType`): `no`, `debug` (default) or `always`.** WARN lines and the request/response diagnostics follow the level; `debug` logs them only in Preview and debug mode (from `getContainerVersion`; when the container version is unavailable the tag behaves as in production). ERROR lines and the aggregated legacy WARN are always logged. A checked *Test Mode* forces `always`. **Production logs drop the WARN lines by default.** *What to check:* choose `always` to keep the 2.3.1 behavior; choose a level and uncheck Test Mode.
+8. **Validation is always strict.** An unknown or empty event name, a SEM ID that does not match `^[0-9a-z]{24}$` and an incomplete Purchase fail the tag, whatever *Strict Event Validation* holds. With a stored "off", the ERROR line ends with `(v2 loose validation no longer applies)`; the hint does not prove that the tag is old. *What to check:* event names and the S2S SEM ID; the 2.3.1 WARN lines named them.
+9. **Malformed objects and array values.** A User Data Object or Event Data Object that is not an object or valid JSON (including `false` and `0`) logs an always-on `[ERROR] <field>: <problem>, got <type>; omitting it`; that object is omitted and the hit continues to the final validation. `contents` and `product_ids` given as a JSON string in any layer (table, object, legacy field, override) are parsed after the merge; a winning value that does not parse or is not an array is omitted with a WARN and never brings back a lower layer's array. 2.3.1 failed both cases under Strict, and its broken Contents or Product IDs field fell back to the GA4 or object array. *What to check:* a Purchase still fails when the trio is missing after merging; a broken legacy Contents JSON no longer falls back to the GA4 or object contents.
+10. **`send_http` is narrowed** to `https://sem.seznam.cz/rtgconv` (was `https://sem.seznam.cz/*`). *What to check:* the permission change on import; no action.
+11. **New permission `read_container_data`**, needed by `getContainerVersion` for Console logging `debug`. *What to check:* approve it on import.
+12. **Version telemetry:** `X-Client-Version` and `api.template_version` are `3.0.0`. *What to check:* nothing.
+13. **Aggregated legacy WARN.** One line per execution when a v2.x item is in active use: `Seznam SEM [WARN]: v2.x settings in use: <items>; move them to the v3 tables/settings (README "Přechod na v3") | trace=…`. Items, in this order: v2.x user fields, v2.x event fields and Status, override tables, user data aliases, GA4 platform keys (`ga4.<key>`, `ga4.items.<key>`), settings (`testMode`, the cookie settings). Names only, never values. It is also logged when the tag fails after the inputs were resolved. *What to check:* move the listed fields to the tables (README "Přechod na verzi 3").
+14. **`event_url` comes from the first usable source:** the Event URL field (a non-blank string, not `'undefined'` / `'null'`; objects are not stringified), then GA4 `page_location` with prefill on, then the Referer header. Without one, `event_url` is omitted (2.3.1 sent `""`); the empty-URL WARN follows Console logging. *What to check:* hits without a URL no longer carry `event_url: ""`.
+
+### Added
+
+- **Event data** and **User data** tables (`eventDataTable`, `userDataTable`): one row per Seznam key, picked from a list (18 event_data keys without `sem_id`, 17 user_data keys), each key at most once. Rows are the highest layer; values are converted to the Seznam types.
+- **Console logging** (`logType`) with the levels `no`, `debug` and `always`.
+- The collapsed group **Starší pole (v2.x)** with the sub-groups User data (v2.x), Event data (v2.x) and Settings (v2.x): the 40 v2.x controls with their v2.3 names, types and values, a "(v2.x) " label and a deprecation help text. They lost the input-mode enabling conditions, so values that were hidden in 2.3 are visible and can be cleared.
+- The aggregated legacy WARN (upgrade note 13).
+
+### Kept
+
+- In-tag BigQuery logging, with its parameters and permission unchanged.
+- The GA4 prefill switches *Prefill user data* and *Prefill event data* (`autoMapUserData`, `autoMapEventData`).
+- The User Data Object aliases (`email`, `phone`, `fname`, …) and the Shoptet/MeasureHive keys in GA4 prefill (`id`, `orderNo`, `revenue`, `totalWithoutVat`, item `id`, `name`, `priceWithVat`, `fullPrice`, `category` with slashes, `currentCategory`, `defaultCategory`). Their payload is unchanged; they are now reported in the aggregated legacy WARN.
+- Consent handling (malformed consent fails the tag; `null` counts as missing), the merge rule, the normalization rules, the `s2s_headers` gate, the Purchase trio, `event_time`, the sid/udid shape rule and cookie fallback, and native `contents` items without an `id`.
+
+### Changed
+
+- `useOptimisticScenario` defaults to `false` for new tags (upgrade note 5).
+- Permissions: `send_http` narrowed, `read_container_data` added (upgrade notes 10 and 11).
+- UI: the groups are GA4 prefill, Event data, User data, Consent, Advanced, BigQuery Logs and Starší pole (v2.x). Event Source and Event Time moved to Advanced. The input-mode selectors `userDataInputMode` and `eventDataInputMode` are removed; no runtime code read them.
+- For freshly created tags, the ignored *Cookie write strategy* defaults to `last_touch` and *Cookie max-age* to empty, without its number validator, so a new tag reports neither. Values stored on existing tags are kept.
+- The Info description reads "Key-value tables or objects, optional GA4 prefill" (175 characters).
+
+### Release gates
+
+1. One green run of the embedded test suite in a connected GTM editor (2.3.1 gate R3, still open).
+2. Import of `feat/v3` over 2.3.1 in the playground (MIGRATION E3/E4/E5): the values of the moved legacy fields survive the import and a re-save, including one field bound to a variable; record which defaults GTM stores on existing and new tags (`useOptimisticScenario`, `logType`, the tables, the cookie settings).
+3. The upgraded playground tags 17 and 20 in Preview: the payload matches the upgrade fixtures (`upgrade fixture - tag 17` / `- tag 20`).
+4. The permission dialog for the narrowed `send_http` and the new `read_container_data` observed on import.
+
+### Notes
+
+- Migration guide: README section "Přechod na verzi 3".
+- Tests: 166 → 221 scenarios. Four upgrade fixtures assert the exact serialized body that 2.3.1 sent for the same inputs (playground tags 20 and 17, every legacy field at once, a tag saved before the v2.2/v2.3 parameters existed); the only differences allowed are upgrade notes 3, 4 and 12. A legacy field-mapping scenario checks all 31 v2.x data fields against an independent parameter-to-key table.
+- Sandboxed JS: 1331 → 1421 lines. The UI shrinks; the JS keeps the aliases, platform keys and BigQuery logging.
+- Items in `contents` without `id`, `content_name` and `content_category` are kept (decision of 2026-10-26, open in 2.3.1).
+- The 30-day sznaiid lifetime is a single constant (`SZNAIID_MAX_AGE`) pending Seznam's answer on the lifetime `sem.js` uses.
+- `metadata.yaml` is re-pinned only after the release commit is pushed.
+
 ## 2.3.1 (unreleased)
 
 Correctness patch for the v2.3 line. The tag now assembles all input layers, normalizes the result once and validates that final payload once, so what is checked is what is sent. No UI parameter is removed or renamed, no default value changes, and no permission is added. The INFO description is shortened to 176 characters, because the GTM editor rejects more than 200. `X-Client-Version` and `api.template_version` report `2.3.1`.
