@@ -84,7 +84,7 @@ ___TEMPLATE_PARAMETERS___
     "name": "semId",
     "displayName": "S2S SEM ID (Sklik)",
     "simpleValueType": true,
-    "help": "Your S2S SEM ID — visible in Sklik account settings under 'Show advanced settings'. This is a SEPARATE identifier from the SEM ID used by the frontend sul.js script. Required for S2S tracking.",
+    "help": "Your S2S SEM ID — visible in Sklik account settings under 'Show advanced settings'. This is a SEPARATE identifier from the SEM ID used by the frontend sul.js script. Required for S2S tracking. Must be 24 characters of 0-9 and a-z; any other value fails the tag under 'Strict Event Validation' and logs a warning otherwise.",
     "valueValidators": [
       {
         "type": "NON_EMPTY"
@@ -621,7 +621,7 @@ ___TEMPLATE_PARAMETERS___
         "checkboxText": "Strict Event Validation",
         "simpleValueType": true,
         "defaultValue": false,
-        "help": "When enabled, unknown event names and invalid JSON in object/array fields cause the tag to fail (and call gtmOnFailure) instead of just logging. Recommended for production hardening. When disabled, such issues are logged but the tag reports success. A malformed consent configuration always fails the tag, regardless of this setting."
+        "help": "When enabled, unknown event names, a SEM ID that is not 24 characters of 0-9 and a-z, and invalid JSON in the user/event data object, contents and product ID fields cause the tag to fail (and call gtmOnFailure) instead of just logging. Recommended for production hardening. When disabled, such issues are logged but the tag reports success. A malformed consent configuration always fails the tag, regardless of this setting."
       },
       {
         "type": "CHECKBOX",
@@ -853,6 +853,9 @@ const CONSENT_KEYS = [
   'functionality_storage', 'analytics_storage'
 ];
 
+// Characters of a sem_id (rtgconv.json: ^[0-9a-z]{24}$).
+const SEM_ID_CHARS = '0123456789abcdefghijklmnopqrstuvwxyz';
+
 // Characters of an IAB TCF v2 string: base64url segments joined by '.'.
 const TCF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-';
 
@@ -1065,11 +1068,9 @@ function validate(payload) {
   if (!payload.event_name) return 'eventName is required';
   if (!ed.sem_id) return 'semId is required';
 
-  // sem_id shape check: non-empty 24-character string.
-  // Full pattern `^[0-9a-z]{24}$` is enforced server-side — a stricter local charset check
-  // would need sandbox-safe string primitives we cannot verify without deploying.
+  // sem_id must match ^[0-9a-z]{24}$ (rtgconv.json); fails under Strict, WARN otherwise.
   if (!isValidSemId(ed.sem_id)) {
-    var semIdMsg = 'semId must be a non-empty 24-character string; expected server-side pattern is ^[0-9a-z]{24}$';
+    var semIdMsg = 'semId must be 24 characters of 0-9 and a-z (^[0-9a-z]{24}$)';
     if (data.strictEventValidation) {
       return semIdMsg;
     }
@@ -1976,14 +1977,14 @@ function isValidSid(v) {
   return c.length === 2 && c[0] === 'c' && c[1].length === 32;
 }
 
-// Local shape check only: non-empty 24-character string.
-// Full charset pattern ^[0-9a-z]{24}$ is enforced server-side. A stricter local
-// charset check (charCodeAt / charAt+indexOf) is avoided here: GTM sandbox
-// dropped charCodeAt in deploy, and we are not willing to assume other
-// String.prototype methods without proof that they work in this sandbox.
+// Full ^[0-9a-z]{24}$ check. charAt and indexOf are documented sandbox String methods;
+// charCodeAt is not (the v2.1.0 check that used it crashed in deployment).
 function isValidSemId(id) {
-  if (!id) return false;
-  return getType(id) === 'string' && id.length === 24;
+  if (getType(id) !== 'string' || id.length !== 24) return false;
+  for (var i = 0; i < id.length; i++) {
+    if (SEM_ID_CHARS.indexOf(id.charAt(i)) === -1) return false;
+  }
+  return true;
 }
 
 // Override rows: later rows win. A row with a missing value is ignored; false and 0 are values.
