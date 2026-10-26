@@ -90,6 +90,8 @@ Every item below changes what an existing tag sends or whether it fails. After u
 - `X-Client-Version` and `api.template_version` reported `2.2.1` in 2.3.0.
 - The INFO description had 268 characters (since 2.3.0); the GTM editor marks more than 200 as invalid input.
 - Two test scenarios used ES6 object shorthand, which the GTM test parser rejects.
+- ERROR lines, which are logged whatever Test Mode holds, could carry payload values, PII and consent values: a BigQuery insert failure logged the rejected row with its `request_body`, the HTTP ERROR an excerpt of the response body, and a transport rejection its serialized object. The BigQuery line now logs only a reason code from BigQuery's documented error table (any other reason as `unknown`) and the row count; the HTTP line has no `body=` (the body stays in the Test Mode Response line); a transport rejection logs `failed`, `timed_out` or `unknown`.
+- A `page_location` that is not a string (an object, number, boolean or array written by a client other than GA4) threw in the sznaiid lookup before any callback. It is now skipped like a missing value: GA4 Auto-Map does not take it as `event_url`, and the Referer fallback applies.
 
 ### Added
 
@@ -107,7 +109,7 @@ Every item below changes what an existing tag sends or whether it fails. After u
 
 ### Notes
 
-- Tests: 70 → 166 scenarios, with a shared `setup:` block. They cover the P0 rows of the review regression matrix and the P0 review fixes. Valid hits assert exactly one request; failures assert none.
+- Tests: 70 → 177 scenarios, with a shared `setup:` block. They cover the P0 rows of the review regression matrix and the P0 review fixes. Valid hits assert exactly one request; failures assert none.
 - The WARN for a payload without `user_ids` now states only what is observable: "no valid sid/udid/hashed PII is present; hit is sent without user_ids".
 - Items in `contents` need no particular key (the schema requires none). Whether items without `id`, `content_name` and `content_category` should be dropped is an open product decision; 2.3.1 keeps them.
 - Deliberately unchanged in 2.3.1 (planned for v3): the optimistic default, Strict Event Validation, first-touch sznaiid, the GA4 event-name map, `transaction_id` as an `event_id` fallback, the frontend-template aliases, BigQuery logging, and the pass-through of identifiers and `review_email` regardless of consent.
