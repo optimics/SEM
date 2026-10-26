@@ -4599,6 +4599,454 @@ scenarios:
     runCode(tagData({ userRegion: true, userState: 'HASH_STATE', userEmail: 'HASH_EM' }));
     assertThat(sent().user_ids.user_data.region).isUndefined();
     assertThat(logged('user_data.region: expected string or number')).isTrue();
+- name: upgrade fixture - tag 20
+  code: |-
+    // Playground tag 20 "SEM - purchase" (review/gtm-verification/baseline-v2.3.md) as v2.3 stored it:
+    // Individual fields, Status true, consent from the Data Client consent_state, BigQuery logging on.
+    // `expected` is the body P0 v2.3.1 (1195cb4) sent for exactly these inputs and mocks.
+    let bigQueryRows = [];
+    mockObject('BigQuery', {
+      insert: (connection, rows) => {
+        bigQueryRows = rows;
+        return Promise.create((resolve) => resolve());
+      }
+    });
+    mock('getTimestampMillis', 1793000000000);
+    mock('getRequestHeader', (name) => ({
+      'trace-id': 'TRACE-20',
+      referer: 'https://www.semdemo.xyz/objednavka/krok-3/',
+      'x-forwarded-for': '203.0.113.7, 10.0.0.1',
+      'user-agent': 'Mozilla/5.0 (request header)',
+      'sec-ch-ua': '"Chromium";v="141"',
+      'sec-ch-ua-mobile': '?0',
+      'sec-ch-ua-platform': '"macOS"'
+    })[name]);
+    mock('getCookieValues', (name) => ({
+      sid: ['id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79'],
+      udid: ['019ef805-5dbe-7e8b-acd1-8caed14a91fa@1782277561803'],
+      sznaiid: ['CLICK-20-OLD']
+    })[name] || []);
+    mock('getAllEventData', {
+      event_name: 'purchase',
+      page_location: 'https://www.semdemo.xyz/objednavka/dekujeme/',
+      ip_override: '198.51.100.20',
+      user_agent: 'Mozilla/5.0 (event data)'
+    });
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'hjqrj33mlq8phxinul9fmdo6',
+      eventSource: 'web',
+      eventUrl: 'https://www.semdemo.xyz/objednavka/dekujeme/',
+      eventId: 'evt-20-0001',
+      eventTime: 1793001234567,
+      enableGa4AutoMap: false,
+      autoMapEventName: false,
+      autoMapUserData: true,
+      autoMapEventData: true,
+      consentModeObject: {
+        ad_storage: true,
+        ad_user_data: true,
+        ad_personalization: false,
+        analytics_storage: true,
+        functionality_storage: true
+      },
+      userDataInputMode: 'fields',
+      userEmail: 'b38f4d7a3bd7bd18fe99987bc73d29c98516c1d688c682ec33e2845bf5c292b5',
+      userPhone: '80e8e7fbf80bfa0767a68adab6d514571310be1caf88c6252624109e478c2ed3',
+      userFirstName: '6a0ac0fd972c325d6ca5512b67a5e0ad996c4a3e9b59971d125164e6d4db1a1c',
+      userLastName: '64118260ecb916c23621d8f2768d8dc75d1f5710b1b7e4f2c41ad41e6bc4d688',
+      userCity: 'f377db9f1f0af132866afd5c4381512a5c9a3b3a32e9ca2f88f0aced18264568',
+      userZip: '8597f1e3043654da36e26467d59c6c6bbc9c44d498cc15ab2f91fc84440bbc35',
+      userStreet: '99b1963027845d9412b4c112878f98e28a35df9b7a86849555b7b64cc34e8b1f',
+      autoMapIdsFromCookies: true,
+      eventDataInputMode: 'fields',
+      currency: 'CZK',
+      value: '1652.89',
+      orderId: 'OBJ-2026-0042',
+      contentType: 'product',
+      contents: [
+        { id: 'SKU-1', quantity: 2, unit_price: 500, content_name: 'Mixér' },
+        { id: 'SKU-2', quantity: 1, unit_price: 1000 }
+      ],
+      valueTax: '347.11',
+      statusEnabled: true,
+      status: 'true',
+      testMode: false,
+      useOptimisticScenario: true,
+      strictEventValidation: false,
+      sendS2sHeaders: true,
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      bigQueryLogType: 'always',
+      logBigQueryProjectId: 'matej-playground-460011',
+      logBigQueryDatasetId: 'demo_sem',
+      logBigQueryTableId: 'sem_log'
+    });
+    const expected = {
+      event_name: 'Purchase',
+      schema_version: 'v2',
+      event_type: 'rtgconv',
+      event_time: 1793001234567,
+      event_source: 'web',
+      event_url: 'https://www.semdemo.xyz/objednavka/dekujeme/',
+      event_data: {
+        sznaiid: 'CLICK-20-OLD',
+        currency: 'CZK',
+        value: 1652.89,
+        value_tax: 347.11,
+        order_id: 'OBJ-2026-0042',
+        content_type: 'product',
+        contents: [
+          { quantity: 2, id: 'SKU-1', unit_price: 500, content_name: 'Mixér' },
+          { quantity: 1, id: 'SKU-2', unit_price: 1000 }
+        ],
+        status: true,
+        sem_id: 'hjqrj33mlq8phxinul9fmdo6'
+      },
+      api: { name: 'gtm-server-template', version: '1', template_version: '2.3.1' },
+      event_id: 'evt-20-0001',
+      consent_mode: {
+        ad_storage: 'granted',
+        ad_user_data: 'granted',
+        ad_personalization: 'denied',
+        functionality_storage: 'granted',
+        analytics_storage: 'granted'
+      },
+      user_ids: {
+        user_data: {
+          em: 'b38f4d7a3bd7bd18fe99987bc73d29c98516c1d688c682ec33e2845bf5c292b5',
+          ph: '80e8e7fbf80bfa0767a68adab6d514571310be1caf88c6252624109e478c2ed3',
+          fn: '6a0ac0fd972c325d6ca5512b67a5e0ad996c4a3e9b59971d125164e6d4db1a1c',
+          ln: '64118260ecb916c23621d8f2768d8dc75d1f5710b1b7e4f2c41ad41e6bc4d688',
+          ct: 'f377db9f1f0af132866afd5c4381512a5c9a3b3a32e9ca2f88f0aced18264568',
+          zp: '8597f1e3043654da36e26467d59c6c6bbc9c44d498cc15ab2f91fc84440bbc35',
+          sr: '99b1963027845d9412b4c112878f98e28a35df9b7a86849555b7b64cc34e8b1f',
+          sid: 'id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79',
+          udid: '019ef805-5dbe-7e8b-acd1-8caed14a91fa'
+        }
+      },
+      s2s_headers: {
+        client_ip_address: '203.0.113.7',
+        user_agent: 'Mozilla/5.0 (request header)',
+        sec_ch_ua: '"Chromium";v="141"',
+        sec_ch_ua_mobile: '?0',
+        sec_ch_ua_platform: '"macOS"'
+      }
+    };
+    assertThat(sent()).isEqualTo(expected);
+    assertThat(requests[0].raw).isEqualTo(JSON.stringify(expected));
+    assertApi('gtmOnSuccess').wasCalled();
+    assertApi('setCookie').wasNotCalled();
+    callLater(() => {
+      assertThat(bigQueryRows.length).isEqualTo(1);
+      assertThat(bigQueryRows[0].request_body).isEqualTo(requests[0].raw);
+    });
+
+- name: upgrade fixture - tag 17
+  code: |-
+    // Playground tag 17 (Auto from GA4 with auto-map, BigQuery on, no consent object) on a GA4
+    // add_to_cart landing hit with a Sklik click. `expected` is the P0 v2.3.1 (1195cb4) body.
+    mockObject('BigQuery', { insert: () => Promise.create((resolve) => resolve()) });
+    mock('getTimestampMillis', 1793000000000);
+    mock('getRequestHeader', (name) => ({
+      'trace-id': 'TRACE-17',
+      'x-forwarded-for': '203.0.113.17',
+      'user-agent': 'Mozilla/5.0 (request header)'
+    })[name]);
+    mock('getCookieValues', (name) => ({
+      sid: ['id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79'],
+      udid: ['019ef805-5dbe-7e8b-acd1-8caed14a91fa@1782277561803']
+    })[name] || []);
+    mock('getAllEventData', {
+      event_name: 'add_to_cart',
+      page_location: 'https://www.semdemo.xyz/mixer-pro/?sznaiid=CLICK-17&utm_source=sklik',
+      currency: 'CZK',
+      value: 1000,
+      items: [
+        { item_id: 'SKU-1', item_name: 'Mixér Pro', item_category: 'Kuchyň', item_category2: 'Mixéry', price: 1210, quantity: 1 }
+      ],
+      user_data: { sha256_email_address: 'b38f4d7a3bd7bd18fe99987bc73d29c98516c1d688c682ec33e2845bf5c292b5' },
+      'x-ga-gcs': 'G100',
+      ip_override: '198.51.100.17',
+      user_agent: 'Mozilla/5.0 (event data)'
+    });
+    runCode({
+      eventNameSelect: 'auto',
+      semId: 'hjqrj33mlq8phxinul9fmdo6',
+      eventSource: 'web',
+      enableGa4AutoMap: true,
+      autoMapEventName: true,
+      autoMapUserData: true,
+      autoMapEventData: true,
+      userDataInputMode: 'object',
+      autoMapIdsFromCookies: true,
+      eventDataInputMode: 'object',
+      statusEnabled: false,
+      testMode: false,
+      useOptimisticScenario: true,
+      strictEventValidation: false,
+      sendS2sHeaders: true,
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      bigQueryLogType: 'always',
+      logBigQueryProjectId: 'matej-playground-460011',
+      logBigQueryDatasetId: 'demo_sem',
+      logBigQueryTableId: 'sem_log'
+    });
+    const expected = {
+      event_name: 'AddToCart',
+      schema_version: 'v2',
+      event_type: 'rtgconv',
+      event_time: 1793000000000,
+      event_source: 'web',
+      event_url: 'https://www.semdemo.xyz/mixer-pro/?sznaiid=CLICK-17&utm_source=sklik',
+      event_data: {
+        currency: 'CZK',
+        contents: [
+          {
+            quantity: 1,
+            id: 'SKU-1',
+            content_name: 'Mixér Pro',
+            unit_price: 1210,
+            content_category: 'Kuchyň | Mixéry'
+          }
+        ],
+        value: 1000,
+        sznaiid: 'CLICK-17',
+        content_type: 'product',
+        sem_id: 'hjqrj33mlq8phxinul9fmdo6'
+      },
+      api: { name: 'gtm-server-template', version: '1', template_version: '2.3.1' },
+      user_ids: {
+        user_data: {
+          em: 'b38f4d7a3bd7bd18fe99987bc73d29c98516c1d688c682ec33e2845bf5c292b5',
+          sid: 'id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79',
+          udid: '019ef805-5dbe-7e8b-acd1-8caed14a91fa'
+        }
+      }
+    };
+    const expectedCookie = { domain: 'auto', path: '/', sameSite: 'lax', secure: true, 'max-age': 7776000, httpOnly: false };
+    assertThat(sent()).isEqualTo(expected);
+    assertThat(requests[0].raw).isEqualTo(JSON.stringify(expected));
+    assertApi('setCookie').wasCalledWith('sznaiid', 'CLICK-17', expectedCookie);
+    assertApi('gtmOnSuccess').wasCalled();
+
+- name: upgrade fixture - every legacy field filled
+  code: |-
+    // Every v2.3 individual field, both override tables, both objects and GA4 prefill at once. The
+    // body asserts the precedence winners (override > field > object > GA4), not that every value
+    // survives. `expected` is the P0 v2.3.1 (1195cb4) body.
+    mock('getTimestampMillis', 1793000000000);
+    mock('getRequestHeader', (name) => ({
+      'trace-id': 'TRACE-ALL',
+      'x-forwarded-for': '203.0.113.9',
+      'user-agent': 'Mozilla/5.0 (request header)'
+    })[name]);
+    mock('getCookieValues', (name) => ({
+      sid: ['id=1111111111111111111|t=1769429094.692|te=1782303169.389|c=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'],
+      udid: ['11111111-2222-3333-4444-555555555555@1782277561803']
+    })[name] || []);
+    mock('getAllEventData', {
+      event_name: 'purchase',
+      page_location: 'https://shop.example/dekujeme/?sznaiid=URL-CLICK',
+      transaction_id: 'GA4-ORDER',
+      currency: 'EUR',
+      value: 1,
+      shipping: 49,
+      items: [{ item_id: 'GA4-ITEM', price: 1, quantity: 1 }],
+      user_data: {
+        sha256_email_address: '388cb31f82c8dc5c715c863cd508ecc43e03a2bd3ecbfc73d05a17ebf08ebc71',
+        sha256_phone_number: '8a67585a46f7f2a291796258a52874925bae26c40f3aa4825a40ec43a15fa94e'
+      }
+    });
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'hjqrj33mlq8phxinul9fmdo6',
+      eventSource: 'web',
+      eventUrl: 'https://shop.example/dekujeme/',
+      eventId: 'evt-all-0001',
+      eventTime: 1793001234567,
+      enableGa4AutoMap: true,
+      autoMapEventName: false,
+      autoMapUserData: true,
+      autoMapEventData: true,
+      consentModeObject: { ad_storage: 'granted', ad_user_data: 'granted' },
+      userDataInputMode: 'fields',
+      userDataObject: {
+        em: 'bddcdeafb06cbf470e7244cbc57cb4e822c81b1c5e3dca5b5322ccb53f98ca85',
+        region: 'bddcdeafb06cbf470e7244cbc57cb4e822c81b1c5e3dca5b5322ccb53f98ca85'
+      },
+      sid: 'id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79',
+      userUdid: '019ef805-5dbe-7e8b-acd1-8caed14a91fa',
+      userEmail: 'b38f4d7a3bd7bd18fe99987bc73d29c98516c1d688c682ec33e2845bf5c292b5',
+      userPhone: '80e8e7fbf80bfa0767a68adab6d514571310be1caf88c6252624109e478c2ed3',
+      userFirstName: '6a0ac0fd972c325d6ca5512b67a5e0ad996c4a3e9b59971d125164e6d4db1a1c',
+      userLastName: '64118260ecb916c23621d8f2768d8dc75d1f5710b1b7e4f2c41ad41e6bc4d688',
+      userGender: '62c66a7a5dd70c3146618063c344e531e6d4b59e379808443ce962b3abd63c5a',
+      userDob: '5e0c46f17ed189d65863756df0241071eb2b1e24e8ec842d3e0618b2ff8eb8b7',
+      userCity: 'f377db9f1f0af132866afd5c4381512a5c9a3b3a32e9ca2f88f0aced18264568',
+      userRegion: '40d1b48a5440bd369733421ca5f7d0035a49ba7f49f01eb42bb7006ec815e681',
+      userState: '8f8206795facc7796edb6cb9d50175a1e0c0be79fb444bbd30720e463f792ca6',
+      userZip: '8597f1e3043654da36e26467d59c6c6bbc9c44d498cc15ab2f91fc84440bbc35',
+      userStreet: '99b1963027845d9412b4c112878f98e28a35df9b7a86849555b7b64cc34e8b1f',
+      userCountry: 'c4e98e070d2cdcd8b6486826223be4f528c54306c9e9c7191a5af6628ffb32e9',
+      userSubscriptionId: 'SUB-42',
+      autoMapIdsFromCookies: true,
+      eventDataInputMode: 'fields',
+      eventDataObject: { order_id: 'OBJECT-ORDER', currency: 'EUR', delivery_type: 'OBJECT-DELIVERY' },
+      sznaiid: 'FIELD-SZNAIID',
+      currency: 'CZK',
+      value: '1000.50',
+      orderId: 'FIELD-ORDER',
+      contentType: 'product',
+      contents: '[{"id":"FIELD-1","quantity":2,"unit_price":250}]',
+      deliveryPrice: '99',
+      deliveryType: 'PPL',
+      paymentType: 'card',
+      otherCosts: '10',
+      predictedLtv: '5000',
+      valueTax: '210.10',
+      reviewEmail: 'jan.novak@example.cz',
+      productIds: '[123, 456]',
+      goodsIntention: '0.8',
+      goodsPhase: '2',
+      searchString: 'mixér',
+      statusEnabled: true,
+      status: 'false',
+      userDataOverrides: [{ name: 'em', value: '93676a064a97784539fd436267ee4c8dd88017834c29c3269f38f3515edcb07f' }],
+      eventDataOverrides: [{ name: 'value', value: '1200' }, { name: 'delivery_type', value: 'Zásilkovna' }],
+      testMode: false,
+      useOptimisticScenario: false,
+      strictEventValidation: false,
+      sendS2sHeaders: true,
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      bigQueryLogType: 'no'
+    });
+    const expected = {
+      event_name: 'Purchase',
+      schema_version: 'v2',
+      event_type: 'rtgconv',
+      event_time: 1793001234567,
+      event_source: 'web',
+      event_url: 'https://shop.example/dekujeme/',
+      event_data: {
+        currency: 'CZK',
+        delivery_price: 99,
+        order_id: 'FIELD-ORDER',
+        contents: [{ quantity: 2, id: 'FIELD-1', unit_price: 250 }],
+        value: 1200,
+        delivery_type: 'Zásilkovna',
+        sznaiid: 'FIELD-SZNAIID',
+        value_tax: 210.1,
+        content_type: 'product',
+        payment_type: 'card',
+        other_costs: 10,
+        predicted_ltv: 5000,
+        goods_intention: 0.8,
+        goods_phase: 2,
+        search_string: 'mixér',
+        review_email: 'jan.novak@example.cz',
+        product_ids: [123, 456],
+        status: false,
+        sem_id: 'hjqrj33mlq8phxinul9fmdo6'
+      },
+      api: { name: 'gtm-server-template', version: '1', template_version: '2.3.1' },
+      event_id: 'evt-all-0001',
+      consent_mode: { ad_storage: 'granted', ad_user_data: 'granted' },
+      user_ids: {
+        user_data: {
+          em: '93676a064a97784539fd436267ee4c8dd88017834c29c3269f38f3515edcb07f',
+          ph: '80e8e7fbf80bfa0767a68adab6d514571310be1caf88c6252624109e478c2ed3',
+          region: '40d1b48a5440bd369733421ca5f7d0035a49ba7f49f01eb42bb7006ec815e681',
+          fn: '6a0ac0fd972c325d6ca5512b67a5e0ad996c4a3e9b59971d125164e6d4db1a1c',
+          ln: '64118260ecb916c23621d8f2768d8dc75d1f5710b1b7e4f2c41ad41e6bc4d688',
+          ge: '62c66a7a5dd70c3146618063c344e531e6d4b59e379808443ce962b3abd63c5a',
+          db: '5e0c46f17ed189d65863756df0241071eb2b1e24e8ec842d3e0618b2ff8eb8b7',
+          ct: 'f377db9f1f0af132866afd5c4381512a5c9a3b3a32e9ca2f88f0aced18264568',
+          zp: '8597f1e3043654da36e26467d59c6c6bbc9c44d498cc15ab2f91fc84440bbc35',
+          sr: '99b1963027845d9412b4c112878f98e28a35df9b7a86849555b7b64cc34e8b1f',
+          country: 'c4e98e070d2cdcd8b6486826223be4f528c54306c9e9c7191a5af6628ffb32e9',
+          subscription_id: 'SUB-42',
+          sid: 'id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79',
+          udid: '019ef805-5dbe-7e8b-acd1-8caed14a91fa'
+        }
+      },
+      s2s_headers: { client_ip_address: '203.0.113.9', user_agent: 'Mozilla/5.0 (request header)' }
+    };
+    const expectedCookie = { domain: 'auto', path: '/', sameSite: 'lax', secure: true, 'max-age': 7776000, httpOnly: false };
+    assertThat(sent()).isEqualTo(expected);
+    assertThat(requests[0].raw).isEqualTo(JSON.stringify(expected));
+    assertApi('setCookie').wasCalledWith('sznaiid', 'URL-CLICK', expectedCookie);
+    assertSucceeded();
+
+- name: upgrade fixture - parameters absent in older saved tags
+  code: |-
+    // A tag saved before v2.2/v2.3 has no value for the parameters those releases added
+    // (autoMapIdsFromCookies, the input modes, GA4 auto-map, the sznaiid cookie settings, eventSource,
+    // statusEnabled, BigQuery). Their runtime defaults apply. `expected` is the P0 v2.3.1 (1195cb4) body.
+    mock('getTimestampMillis', 1793000000000);
+    mock('getRequestHeader', (name) => ({
+      'trace-id': 'TRACE-OLD',
+      referer: 'https://shop.example/produkt/?sznaiid=OLD-CLICK',
+      'x-forwarded-for': '203.0.113.21',
+      'user-agent': 'Mozilla/5.0 (request header)'
+    })[name]);
+    mock('getCookieValues', (name) => ({
+      sid: ['id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79'],
+      udid: ['019ef805-5dbe-7e8b-acd1-8caed14a91fa@1782277561803']
+    })[name] || []);
+    mock('getAllEventData', {});
+    runCode({
+      eventNameSelect: 'Purchase',
+      semId: 'hjqrj33mlq8phxinul9fmdo6',
+      eventUrl: 'https://shop.example/dekujeme/',
+      orderId: 'OLD-1',
+      currency: 'CZK',
+      value: 500,
+      contents: '[{"id":"A","quantity":1,"unit_price":605}]',
+      userEmail: 'b38f4d7a3bd7bd18fe99987bc73d29c98516c1d688c682ec33e2845bf5c292b5',
+      consentModeObject: { ad_storage: 'granted', ad_user_data: 'granted' },
+      testMode: false,
+      useOptimisticScenario: false,
+      strictEventValidation: false,
+      sendS2sHeaders: true
+    });
+    const expected = {
+      event_name: 'Purchase',
+      schema_version: 'v2',
+      event_type: 'rtgconv',
+      event_time: 1793000000000,
+      event_source: 'web',
+      event_url: 'https://shop.example/dekujeme/',
+      event_data: {
+        sznaiid: 'OLD-CLICK',
+        currency: 'CZK',
+        value: 500,
+        order_id: 'OLD-1',
+        contents: [{ quantity: 1, id: 'A', unit_price: 605 }],
+        content_type: 'product',
+        sem_id: 'hjqrj33mlq8phxinul9fmdo6'
+      },
+      api: { name: 'gtm-server-template', version: '1', template_version: '2.3.1' },
+      consent_mode: { ad_storage: 'granted', ad_user_data: 'granted' },
+      user_ids: {
+        user_data: {
+          em: 'b38f4d7a3bd7bd18fe99987bc73d29c98516c1d688c682ec33e2845bf5c292b5',
+          sid: 'id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79',
+          udid: '019ef805-5dbe-7e8b-acd1-8caed14a91fa'
+        }
+      },
+      s2s_headers: { client_ip_address: '203.0.113.21', user_agent: 'Mozilla/5.0 (request header)' }
+    };
+    const expectedCookie = { domain: 'auto', path: '/', sameSite: 'lax', secure: true, 'max-age': 7776000, httpOnly: false };
+    assertThat(sent()).isEqualTo(expected);
+    assertThat(requests[0].raw).isEqualTo(JSON.stringify(expected));
+    assertApi('setCookie').wasCalledWith('sznaiid', 'OLD-CLICK', expectedCookie);
+    assertSucceeded();
 setup: |-
   // Sandboxed test code has no JSON, Promise or callLater globals; require them like the template does.
   const JSON = require('JSON');
@@ -4610,14 +5058,14 @@ setup: |-
   const VALID_UDID = '019ef805-5dbe-7e8b-acd1-8caed14a91fa';
   const TCF_STRING = 'CQGzWAAQGzWAAAHABBENBKFsAP_gAEPgAAAAKZtV_G__bXlv-X736ftkeY1f9_h77sQxBhfJs.4FzLvW_JwX32EzNE36tqYKmRIAu3bBIQNtHJjUTVChaogVrzDsak2coTtKJ-BkiHMRe2dY';
 
-  // Every outgoing request and console line of the scenario. Set httpResult to change the response,
-  // or to 'reject' to simulate a transport failure.
+  // Every outgoing request (parsed body and raw serialized body) and console line of the scenario.
+  // Set httpResult to change the response, or to 'reject' to simulate a transport failure.
   let requests = [];
   let logs = [];
   let httpResult = { statusCode: 200, headers: { 'x-request-id': 'REQ-1' }, body: '' };
 
   mock('sendHttpRequest', (url, options, body) => {
-    requests.push({ url: url, options: options, body: JSON.parse(body) });
+    requests.push({ url: url, options: options, body: JSON.parse(body), raw: body });
     return Promise.create((resolve, reject) => {
       if (httpResult === 'reject') reject({ reason: 'timed_out' });
       else resolve(httpResult);
