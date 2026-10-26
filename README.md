@@ -27,11 +27,46 @@ Doporučený postup:
 
 `sul.js` ukládá cookies `sid` a `udid` na doménu tvořenou posledními dvěma částmi hostname webu: z `www.eshop.cz` vznikne `.eshop.cz`. Prohlížeč tyto cookies posílá jen na adresy pod touto doménou. SGTM endpoint proto musí běžet na subdoméně stejné domény, například `sgtm.eshop.cz`. Na endpoint s jinou doménou (výchozí adresa Cloud Run, doména poskytovatele hostingu) cookies `sid` a `udid` nedorazí a cookie fallback nic nedoplní.
 
+### Souhlas musí dostat `sul.js` i serverový tag (dva samostatné kroky)
+
+**1. CMP → `sul.js`.** Pokud CMP nepoužívá IAB TCF, předejte její stav také knihovně Seznamu: po načtení `sul.js` zavolejte `SEM('updateConsent', {consent_mode: stavZCMP})` při inicializaci stránky (výchozí stav CMP) a po každé změně volby uživatele. Samotný Google Consent Mode update tento krok nenahrazuje. Bez tohoto propojení `sul.js` cookies `sid` ani `udid` nevytvoří (ověřeno v testovacím kontejneru 26. 10. 2026: po zavolání vznikly do 6 s).
+
+Příklad. Funkce `nactiStavCmp()` a `priZmeneCmp()` nahraďte API vaší CMP a kategorie (`marketing`, `analytics`, `functional`) kategoriemi, které vaše CMP používá. Hodnoty musí odpovídat skutečné volbě uživatele, ne napevno `granted`.
+
+```html
+<script src="https://l.seznam.cz/sul.js?id=VASE_SEM_ID"></script>
+<script>
+  function semConsentMode(stav) {
+    return {
+      ad_storage: stav.marketing ? 'granted' : 'denied',
+      ad_user_data: stav.marketing ? 'granted' : 'denied',
+      ad_personalization: stav.marketing ? 'granted' : 'denied',
+      analytics_storage: stav.analytics ? 'granted' : 'denied',
+      functionality_storage: stav.functional ? 'granted' : 'denied'
+    };
+  }
+  if (typeof window.SEM === 'function') {
+    // Při inicializaci stránky: aktuální (výchozí) stav CMP.
+    SEM('updateConsent', { consent_mode: semConsentMode(nactiStavCmp()) });
+    // Po každé změně volby uživatele.
+    priZmeneCmp(function (stav) {
+      SEM('updateConsent', { consent_mode: semConsentMode(stav) });
+    });
+  }
+</script>
+```
+
+**2. CMP → serverový tag.** Proměnnou se stavem souhlasu namapujte do **Consent Mode Object v každém SEM tagu**, včetně tagů se zapnutým GA4 Auto-Map. Auto-Map consent neodvozuje; bez tohoto pole odejde hit bez informace o souhlasu (warning `no consent signal`). Propojení CMP → `sul.js` a přenos CMP → serverový tag jsou dva samostatné kroky; ověřte oba. Jak stav souhlasu do SGTM přenést, popisuje sekce [Přenos stavu souhlasu do SGTM](#přenos-stavu-souhlasu-do-sgtm).
+
+**3. Hity těsně po udělení souhlasu.** Automaticky znovu odeslaný `page_view` po kliknutí na „Přijmout“ SEM tag nespustí. Postup popisuje sekce [Hity před souhlasem a po něm](#hity-před-souhlasem-a-po-něm).
+
 ### S2S SEM ID není stejné jako frontend SEM ID
 
 Pole **S2S SEM ID (Sklik)** je identifikátor pro server-to-server měření. Najdete ho ve Skliku v pokročilém nastavení účtu. Není to stejné ID jako frontendové `sul.js?id=...`.
 
-Šablona kontroluje, že S2S SEM ID má přesně 24 znaků z `0-9` a `a-z` (`^[0-9a-z]{24}$`). Se zapnutou volbou **Strict Event Validation** jiná hodnota tag zastaví a nic se neodešle. Bez ní šablona zaloguje warning a hit odešle; Seznam ho odmítne. Frontendové i S2S SEM ID mají 24 znaků, takže jejich záměnu lokální kontrola nerozpozná. Seznam na ni odpoví HTTP 401 nebo 403 a šablona k chybě zaloguje nápovědu.
+Šablona kontroluje, že S2S SEM ID má přesně 24 znaků z `0-9` a `a-z` (`^[0-9a-z]{24}$`). Se zapnutou volbou **Strict Event Validation** jiná hodnota tag zastaví a nic se neodešle. Bez ní šablona zaloguje warning a hit odešle; jak s ním Seznam naloží, není zaručené. Schéma vyžaduje `^[0-9a-z]{24}$`. 490 hitů z testovacího kontejneru s SEM ID ve správném formátu dostalo odpověď `200` i bez consentu a bez `sid`/`udid`; o chybném SEM ID neříkají nic. Samotná odpověď `200` nedokládá, jak Seznam vyhodnotil consent ani atribuci.
+
+Frontendové i S2S SEM ID mají 24 znaků, takže jejich záměnu lokální kontrola nerozpozná. Podle dokumentace Seznamu může odpověď 401/403 znamenat chybné SEM ID nebo nepřístupný endpoint; šablona k takové odpovědi zaloguje nápovědu.
 
 ### Serverová šablona nehashuje PII
 
@@ -247,8 +282,12 @@ Po sloučení všech vrstev šablona projde výsledný payload jednou a každou 
 
 - Klíč mimo schéma `event_data`, `user_data` nebo položky `contents` se neodešle a zaloguje se warning.
 - Čísla: JS číslo nebo desetinný řetězec s tečkou (`'1234.50'`, `'-5'`). Řetězce `'1 234,50'`, `'1,234'`, `'1e3'` a `'Infinity'` jsou neplatné; šablona nehádá formát čísla podle locale.
-- ID (`order_id`, `event_id`, `sznaiid`, `contents[].id`, hodnoty `user_data`): neprázdný string; číslo se převede na string. Řetězce `'undefined'` a `'null'` se zahodí s warningem.
-- `status`: `true`/`false`, `1`/`0`, `'true'`/`'false'`.
+- ID (`order_id`, `event_id`, `sznaiid`, `contents[].id`, hodnoty `user_data`): neprázdný string; číslo se převede na string (`0` → `"0"`).
+- Řetězce `'undefined'` a `'null'` (typický výsledek rozbitého mapování proměnné) se ve všech klíčích kromě volného textu (`search_string`, `content_name`, `content_category`) berou jako nevyplněné: nepřepíšou hodnotu z dřívější vrstvy a šablona zaloguje warning. Ve volném textu zůstanou jako slova.
+- `status`: `true`/`false`, `1`/`0`, `'true'`/`'false'`, ze všech vrstev včetně pole Status. Zapnuté pole Status bez hodnoty odešle `false`.
+- `content_type`: `page`, `product`, `product_group` nebo `search`. Jiná hodnota se vynechá s warningem; když zůstanou `contents`, doplní se `product`.
+- GA4 Auto-Map bere jako ID jen string nebo konečné číslo. Objekt, boolean, pole, NaN nebo Infinity v `transaction_id` či `item_id` přeskočí a použije další zdroj (`id`, `orderNo`).
+- Pole pro JSON (User Data Object, Event Data Object, Contents, Product IDs): prázdný řetězec znamená nevyplněno; `false` nebo `0` je chyba vstupu (se Strict Event Validation tag selže, jinak ERROR v logu).
 - Řetězce se ořežou o mezery na začátku a na konci.
 - Neplatná nepovinná hodnota se vynechá s warningem. Neplatná povinná hodnota (`order_id`, `currency`, `value` u Purchase) tag zastaví.
 - Chybějící hodnota (`undefined`, `null`, prázdný řetězec) nic nepřepisuje. `false`, `0` a `[]` jsou hodnoty.
@@ -279,7 +318,9 @@ Pokud nepoužíváte GA4 Auto-Map, `contents` posílejte v nativním SEM tvaru:
 
 Pravidla pro `contents` ze všech zdrojů (GA4 Auto-Map, Event Data Object, pole Contents, overrides):
 
-- Položka, jejíž `quantity` je vyplněné, ale není celé číslo alespoň 1 (`0`, záporné, `0.5`, `1.9`, nečíselné, `Infinity`), se zahodí s warningem. Ostatní položky i událost se odešlou.
+- Chybějící `quantity` i řetězec `'null'` / `'undefined'` šablona odešle jako `1`; řetězec zaloguje warning.
+- Položka, jejíž `quantity` je vyplněné, ale není celé číslo alespoň 1 (`0`, záporné, `0.5`, `1.9`, `'abc'`, `Infinity`), se zahodí s warningem. Ostatní položky i událost se odešlou.
+- Položka nepotřebuje žádný konkrétní klíč (schéma žádný nevyžaduje); šablona ponechá i položku bez `id`, `content_name` a `content_category`.
 - Když se zahodí všechny položky, `contents` se neodešle a šablona nedoplní ani `content_type`. Explicitně vyplněné `content_type` zůstane.
 - Explicitně předané prázdné pole `[]` se odešle jako `[]`.
 - Klíče mimo tabulku výše se zahodí s warningem.
@@ -323,7 +364,7 @@ Předpoklady:
 
 - **Same-site SGTM endpoint**, aby cookies vůbec dorazily do server containeru (viz [SGTM endpoint musí být na stejném webu](#sgtm-endpoint-musí-být-na-stejném-webu-same-site)).
 - **Consent**: šablona vidí jen příchozí cookie, ne podmínky, za kterých vznikla. `sul.js` vytváří `sid` až po udělení souhlasu. Šablona stejně jako u explicitních polí předává `user_ids` spolu s `consent_mode`; vyhodnocení consentu je na straně Seznamu (viz [Consent](#consent)). Pokud chcete být striktnější, fallback vypněte a posílejte `sid`/`udid` jen explicitně.
-- **Safari (ITP)**: cookie `sid` může chybět (vytváří ji JS, ITP ji ořezává). `udid` je dostupné. V takovém případě fallback `sid` prostě nedoplní.
+- **Safari (ITP)**: WebKit maže cookies vytvořené JavaScriptem, tedy i `sid` a `udid`, po 7 dnech bez interakce uživatele s webem ([WebKit Tracking Prevention](https://webkit.org/tracking-prevention/#intelligent-tracking-prevention-itp)). Dokud je `sul.js` znovu nevytvoří, fallback je nedoplní.
 
 Pokud cookies do SGTM dorazí, nemusíte `sid`/`udid` posílat jako GA4 event parametry (`ep.sid`/`ep.udid`).
 
@@ -353,7 +394,8 @@ Po sloučení vrstev šablona výsledný payload jednou normalizuje (viz [Typov�
 
 Speciální případy:
 
-- Chybějící hodnota (`undefined`, `null`, prázdný řetězec) v pozdější vrstvě hodnotu z dřívější vrstvy nepřepíše. Například `eventDataObject` s `order_id: null` ponechá `order_id` z GA4 Auto-Map.
+- Hodnota, která není vyplněná, nikdy nepřepíše hodnotu z dřívější vrstvy. Nevyplněná je hodnota `undefined`, `null`, prázdný řetězec a řetězec `'undefined'` / `'null'` (ten ve všech klíčích kromě volného textu `search_string`, `content_name`, `content_category`). Například `eventDataObject` s `order_id: null` nebo `order_id: 'null'` ponechá `order_id` z GA4 Auto-Map.
+- `false`, `0` a `[]` jsou hodnoty. Vyplněná, ale neplatná hodnota přepíše dřívější vrstvu a pak ji normalizace vynechá s warningem; šablona se k dřívější hodnotě nevrací.
 - `contents` z object variable, pole Contents nebo overrides, včetně prázdného `[]`, nahradí `contents` z GA4 Auto-Map.
 - `sznaiid` z cookie/URL je fallback mezi object variable a individual fields.
 - `sid`/`udid` z cookies (`sid`, `udid`) jsou fallback **až po Advanced Overrides** - doplní se jen když z předchozích vrstev chybí platná hodnota. Viz [Auto-map sid/udid z cookies](#auto-map-sidudid-z-cookies).
@@ -377,20 +419,27 @@ Override tabulka neumí mazat pole. Řádky s prázdnou hodnotou jsou ignorovan�
 
 ### Odkud šablona consent bere
 
-Šablona čte consent jen z polí **Consent Mode Object** a **Consent String (IAB TCF)** ve skupině Consent. Nečte ho z GA4 event dat (ani z parametrů `x-ga-gcs` / `x-ga-gcd`) ani z cookies CMP. Stav souhlasu proto musíte do SGTM přenést sami, například jako parametr GA4 události.
+Šablona čte consent jen z polí **Consent Mode Object** a **Consent String (IAB TCF)** ve skupině Consent. Nečte ho z GA4 event dat (ani z parametrů `x-ga-gcs` / `x-ga-gcd`) ani z cookies CMP. Stav souhlasu proto musíte do SGTM přenést sami a namapovat ho v každém SEM tagu.
 
-Příklad přenosu:
+### Přenos stavu souhlasu do SGTM
 
-1. Na webu přidejte do GA4 události parametr `sem_consent` s JSON stringem stavu souhlasu z vaší CMP, například:
+**Varianta A: parametr GA4 události.** GA4 omezuje hodnotu parametru události na 100 znaků a počítá délku po URL kódování ([limity sběru událostí GA4](https://support.google.com/analytics/answer/9267744)). Pošlete proto jen tři reklamní klíče, s hodnotami `1` (granted) a `0` (denied), které šablona přijímá:
 
-   ```json
-   {"ad_storage":"granted","ad_user_data":"granted","ad_personalization":"denied","analytics_storage":"granted"}
-   ```
+```json
+{"ad_storage":1,"ad_user_data":1,"ad_personalization":0}
+```
 
+Tato hodnota má 56 znaků, po URL kódování 82. Tvar s řetězci, `{"ad_storage":"granted","ad_user_data":"granted","ad_personalization":"granted"}`, má 80 znaků, ale po URL kódování 118, tedy nad limitem.
+
+1. Na webu přidejte do GA4 události parametr `sem_consent` s touto hodnotou, sestavenou ze skutečné volby uživatele v CMP.
 2. V SGTM vytvořte proměnnou typu **Event Data** s Key Path `sem_consent`.
-3. Tuto proměnnou přiřaďte do pole **Consent Mode Object**.
+3. Proměnnou přiřaďte do pole **Consent Mode Object** v každém SEM tagu.
 
-Hodnotu ověříte v sGTM Preview: proměnná musí obsahovat objekt nebo JSON string objektu s podporovanými klíči, ne obal typu `{"consent_mode": {...}}`.
+Částečný `consent_mode` je platný: schéma vyžaduje alespoň jeden podporovaný klíč (`anyOf`), ne všech pět. Šablona chybějící klíče nedoplňuje. Klíče `ad_storage` a `ad_user_data` otevírají bránu pro `s2s_headers`.
+
+**Varianta B: objekt přes Data Tag a Data Client.** Testovací kontejner předává stav souhlasu jako objekt `consent_state` v event datech z Data Clientu: proměnná **Event Data** `consent_state` je v Purchase tagu namapovaná do Consent Mode Object a všech 8 zalogovaných Purchase hitů z tohoto tagu obsahovalo `consent_mode`. Nejde o parametr GA4 události, takže se na něj limit 100 znaků nevztahuje. Hodnoty `true`/`false` i `granted`/`denied` šablona převede.
+
+U obou variant ověřte v sGTM Preview, že proměnná obsahuje celou hodnotu: objekt nebo JSON string objektu s podporovanými klíči, ne zkrácený řetězec ani obal typu `{"consent_mode": {...}}`. Zkrácený JSON nejde rozparsovat a tag pak podle pravidla pro chybný consent selže.
 
 ### Podporované klíče a hodnoty
 
@@ -401,6 +450,7 @@ Podporované klíče: `ad_storage`, `ad_user_data`, `ad_personalization`, `funct
 | `'granted'`, `true`, `1`, `'1'`, `'true'` | `granted` |
 | `'denied'`, `false`, `0`, `'0'`, `'false'` | `denied` |
 
+- Mezery na začátku a na konci řetězce se ignorují (`' granted '` je `granted`). Velikost písmen se nemění: `'Granted'` je chyba.
 - Klíče, které v objektu jsou, se odešlou. Chybějící klíče šablona nedoplňuje.
 - Ostatní klíče (například `wait_for_update`) se ignorují.
 - Prázdná hodnota a řetězce `'undefined'` / `'null'` znamenají, že klíč není vyplněný.
@@ -434,9 +484,17 @@ Seznam vyhodnocuje TCF consent string přednostně před `consent_mode` („Syst
 
 ### Hity před souhlasem a po něm
 
-V Advanced Consent Mode Google tag po udělení souhlasu `ad_storage` automaticky znovu odešle dřívější `page_view` a klíčové události, které vznikly se souhlasem denied (hit s parametrem `x-ga-gcu`). Publikované testy ([Simo Ahava, 30. 4. 2024](https://www.simoahava.com/gtmtips/automatic-page-view-hits-to-sgtm-after-consent-granted/)) a dokumentace [Stape Event Generator (14. 4. 2026)](https://community.stape.io/t/event-generator-tag-for-google-tag-manager-server-side/3933) uvádějí, že na těchto znovu odeslaných hitech se custom serverové tagy, včetně tohoto typu šablony, nespouštějí. Google parametr `x-ga-gcu` uvádí mezi [interními parametry](https://developers.google.com/tag-platform/tag-manager/server-side/internal-parameters), pravidlo potlačení tagů ale nedokumentuje.
+Ověřeno v testovacím kontejneru 26. 10. 2026 (web s cookie lištou bez IAB TCF, SEM tag s GA4 Auto-Map):
 
-Když k tomu dojde, SEM tag proběhne jen na původním hitu se souhlasem denied. Šablona to opravit nemůže, protože se na znovu odeslaném hitu vůbec nespustí. Netýká se to nových běžných událostí odeslaných po udělení souhlasu.
+| Hit | Consent | GA4 tag | SEM tag |
+|---|---|---|---|
+| `page_view` před souhlasem (`gcs=G100`) | denied | spustil se | spustil se |
+| stejný `page_view` znovu odeslaný po kliknutí na „Přijmout“ (`gcs=G111`, `gcu=1`) | granted | spustil se | **nespustil se** |
+| nový běžný `page_view` na další stránce (`gcs=G111`, bez `gcu`) | granted | spustil se | spustil se |
+
+Trigger SEM tagu neměl žádnou podmínku na consent ani na `gcu`. SGTM tedy na automaticky znovu odeslaném hitu (`gcu=1`) SEM tag nespustí, a pro vstupní stránku dostane SEM jen hit z doby před souhlasem. Šablona to opravit nemůže, protože se na znovu odeslaném hitu vůbec nespustí. Nové běžné události odeslané po udělení souhlasu SEM tag spouštějí normálně.
+
+Stejné chování popisují [Simo Ahava (30. 4. 2024)](https://www.simoahava.com/gtmtips/automatic-page-view-hits-to-sgtm-after-consent-granted/) a dokumentace [Stape Event Generator (14. 4. 2026)](https://community.stape.io/t/event-generator-tag-for-google-tag-manager-server-side/3933). Google parametr `x-ga-gcu` uvádí mezi [interními parametry](https://developers.google.com/tag-platform/tag-manager/server-side/internal-parameters), pravidlo potlačení tagů ale nedokumentuje.
 
 Doporučený postup:
 
@@ -458,7 +516,7 @@ Tabulku (a případně dataset) si vytvoř předem. Šablona zapisuje tyto sloup
 | Sloupec | Typ | Obsah |
 |---|---|---|
 | `tag_name` | STRING | vždy `"Seznam SEM"` |
-| `event_name` | STRING | např. `Purchase` (prázdné u validační chyby) |
+| `event_name` | STRING | vyhodnocený název události, pokud je k dispozici (např. `Purchase`) |
 | `request_method` | STRING | `"POST"` |
 | `request_url` | STRING | endpoint API |
 | `request_body` | STRING | JSON string odeslaného payloadu |
@@ -512,13 +570,14 @@ Efektivní omezení zápisu řešte přes IAM na sGTM service accountu:
 | Tag skončí jako *Failed* hned, bez requestu | V Console sGTM Preview najděte řádek `Seznam SEM [ERROR]`. Jmenuje pole a problém: chybějící Event Name nebo SEM ID, chybný consent, neúplný Purchase, nevalidní JSON nebo SEM ID mimo `^[0-9a-z]{24}$` při Strict Event Validation. |
 | `[ERROR] consentModeObject…` nebo `[ERROR] consentString…` | Consent Mode Object nebo Consent String je vyplněný, ale chybný. Opravte mapování proměnné podle sekce [Consent](#consent). |
 | Warning na SEM ID | S2S SEM ID musí mít 24 znaků z `0-9` a `a-z`. Se Strict Event Validation tag selže. |
-| HTTP 401 / 403 | Seznam odmítl SEM ID nebo přístup k endpointu. Použijte S2S SEM ID ze Skliku, ne SEM ID ze `sul.js`. |
+| HTTP 401 / 403 | Podle dokumentace Seznamu může 401/403 znamenat chybné SEM ID nebo nepřístupný endpoint. Zkontrolujte, že je v tagu S2S SEM ID ze Skliku, ne SEM ID ze `sul.js`. |
 | Purchase selhává | Výsledný payload (po všech vrstvách a normalizaci) musí obsahovat `order_id`, `currency` a číselné `value` bez DPH. Šablona `value` nedopočítává z položek. ERROR řádek jmenuje chybějící pole. |
 | Warning `… is not a Seznam field` | Klíč není v SEM schématu a šablona ho neodešle. Přejmenujte ho na SEM klíč nebo ho odstraňte. |
 | Warning `…: expected number…; omitting` | Hodnota není číslo ani desetinný řetězec s tečkou. Opravte formát na webu (`1234.50`, ne `1 234,50`). |
+| Warning `… is the placeholder string "undefined"` | Proměnná se vyhodnotila na text `undefined` nebo `null`. Šablona hodnotu bere jako nevyplněnou; opravte mapování proměnné. |
 | Warning `…quantity…; dropping the item` | Položka má množství 0, záporné, desetinné nebo nečíselné a neodešle se. Opravte data na webu; chybějící množství šablona doplní jako `1`. |
-| Warning `no valid sid` | Do SGTM nedorazila platná cookie `sid` ani platná explicitní hodnota. Zkontrolujte same-site endpoint, consent a načtení `sul.js` před GA4. |
-| Warning `no consent signal` | Consent Mode Object ani Consent String nejsou vyplněné. Nastavte přenos consentu podle sekce [Consent](#consent). |
+| Warning `no valid sid` | Do SGTM nedorazila platná cookie `sid` ani platná explicitní hodnota. U CMP bez IAB TCF zkontrolujte volání `SEM('updateConsent', …)` (bez něj `sul.js` `sid` nevytvoří), dále same-site endpoint a načtení `sul.js` před GA4. |
+| Warning `no consent signal` | Consent Mode Object ani Consent String nejsou v tomto tagu vyplněné, nebo mají všechny klíče prázdnou hodnotu. Namapujte Consent Mode Object v každém SEM tagu, včetně GA4 Auto-Map tagů (viz [Přenos stavu souhlasu do SGTM](#přenos-stavu-souhlasu-do-sgtm)). |
 | Unknown event name warning | Název události musí být jeden z podporovaných SEM eventů. |
 | Chybí `event_url` | Vyplňte `Event URL`, zapněte GA4 Auto-Map s `page_location`, nebo zajistěte `Referer`. |
 | Chybí user_ids | Předávejte minimálně `sid` a `udid` ze `sul.js`, případně zahashované PII. |
