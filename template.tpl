@@ -1121,8 +1121,8 @@ function failTag(message) {
 
 // Validates and normalizes the configured consent inputs. Returns { mode, string, error }.
 // - consent_mode: an object or a JSON object string. Supported keys take granted/denied or
-//   true/false, 1/0 (also as strings) and are forwarded as present; missing keys are never
-//   filled. Other keys (e.g. wait_for_update) are ignored.
+//   true/false, 1/0 (also as strings, trimmed) and are forwarded as present; missing keys are
+//   never filled. Other keys (e.g. wait_for_update) are ignored.
 // - consent_string: forwarded when it passes a syntax check for IAB TCF v2 (first character C,
 //   only A-Z a-z 0-9 _ . -). The check is a heuristic, not proof of a valid TCF string.
 // Missing inputs (undefined, null, '', 'undefined', 'null') are optional. An actual null on a
@@ -1134,7 +1134,7 @@ function failTag(message) {
 function resolveConsent(rawMode, rawString) {
   var result = { mode: {}, string: undefined, error: undefined };
 
-  if (!isMissing(rawMode) && !isPlaceholder(rawMode)) {
+  if (!isUnset(rawMode)) {
     var obj = getType(rawMode) === 'string' ? JSON.parse(rawMode) : rawMode;
     if (getType(obj) !== 'object') {
       result.error = 'consentModeObject: expected object with granted/denied values, got ' + getType(rawMode);
@@ -1154,13 +1154,15 @@ function resolveConsent(rawMode, rawString) {
     for (var i = 0; i < CONSENT_KEYS.length; i++) {
       var name = CONSENT_KEYS[i];
       var v = obj[name];
-      if (!obj.hasOwnProperty(name) || v === undefined || (getType(v) === 'string' && (v.trim() === '' || isPlaceholder(v)))) continue;
+      if (!obj.hasOwnProperty(name) || v === undefined || (getType(v) === 'string' && isUnset(v))) continue;
       if (v === null) {
         warn('consentModeObject.' + name + ' is null; treating it as missing');
         continue;
       }
-      var state = (v === 'granted' || v === 'denied') ? v : undefined;
-      var bool = toBoolean(v);
+      // Strings are trimmed but never case-folded: ' granted ' is granted, ' Granted ' fails (R9).
+      var value = getType(v) === 'string' ? v.trim() : v;
+      var state = (value === 'granted' || value === 'denied') ? value : undefined;
+      var bool = toBoolean(value);
       if (bool !== undefined) state = bool ? 'granted' : 'denied';
       if (!state) {
         result.error = 'consentModeObject.' + name + ': expected granted/denied (or true/false, 1/0), got ' + getType(v);
@@ -1170,7 +1172,7 @@ function resolveConsent(rawMode, rawString) {
     }
   }
 
-  if (!isMissing(rawString) && !isPlaceholder(rawString)) {
+  if (!isUnset(rawString)) {
     if (getType(rawString) !== 'string' || !isTcfString(rawString.trim())) {
       result.error = 'consentString: expected IAB TCF v2 string (starts with C; letters, digits, _ . -), got ' + getType(rawString);
       return result;
