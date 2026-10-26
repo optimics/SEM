@@ -187,7 +187,7 @@ ___TEMPLATE_PARAMETERS___
         "name": "consentModeObject",
         "displayName": "Consent Mode Object (optional)",
         "simpleValueType": true,
-        "help": "A GTM variable resolving to a consent_mode object, or a JSON string of one. Supported keys: ad_storage, ad_user_data, ad_personalization, functionality_storage, analytics_storage. Accepted values: 'granted'/'denied', true/false, 1/0 and '1'/'0'/'true'/'false'; they are sent as 'granted'/'denied'. Supported keys are forwarded as present and missing keys are not filled. Other keys (e.g. wait_for_update) are ignored. If the variable is set but malformed (not an object, no supported key, or an invalid value such as 'Granted', 'yes' or null on a supported key), the tag fails with an ERROR and sends nothing."
+        "help": "A GTM variable resolving to a consent_mode object, or a JSON string of one. Supported keys: ad_storage, ad_user_data, ad_personalization, functionality_storage, analytics_storage. Accepted values: 'granted'/'denied', true/false, 1/0 and '1'/'0'/'true'/'false'; they are sent as 'granted'/'denied'. Supported keys are forwarded as present and missing keys are not filled. Other keys (e.g. wait_for_update) are ignored. A null value counts as missing: that key is omitted with a warning. If the variable is set but malformed (not an object, no supported key, or an invalid value such as 'Granted', 'yes' or 2 on a supported key), the tag fails with an ERROR and sends nothing."
       },
       {
         "type": "TEXT",
@@ -1121,10 +1121,11 @@ function failTag(message) {
 //   filled. Other keys (e.g. wait_for_update) are ignored.
 // - consent_string: forwarded when it passes a syntax check for IAB TCF v2 (first character C,
 //   only A-Z a-z 0-9 _ . -). The check is a heuristic, not proof of a valid TCF string.
-// Missing inputs (undefined, null, '', 'undefined', 'null') are optional. A malformed object, an
-// invalid value on a supported key (including null) or a failed TCF check is a configuration
-// error and fails the tag: Seznam prefers TCF over consent_mode, so dropping or replacing
-// one of them would send a consent signal the advertiser did not configure.
+// Missing inputs (undefined, null, '', 'undefined', 'null') are optional. An actual null on a
+// supported key is missing too: the key is omitted with a WARN and never filled (R1).
+// A malformed object, any other invalid value on a supported key or a failed TCF check is a
+// configuration error and fails the tag: Seznam prefers TCF over consent_mode, so dropping or
+// replacing one of them would send a consent signal the advertiser did not configure.
 // Error messages name the field and the received type, never the value.
 function resolveConsent(rawMode, rawString) {
   var result = { mode: {}, string: undefined, error: undefined };
@@ -1150,6 +1151,10 @@ function resolveConsent(rawMode, rawString) {
       var name = CONSENT_KEYS[i];
       var v = obj[name];
       if (!obj.hasOwnProperty(name) || v === undefined || (getType(v) === 'string' && (v.trim() === '' || isPlaceholder(v)))) continue;
+      if (v === null) {
+        warn('consentModeObject.' + name + ' is null; treating it as missing');
+        continue;
+      }
       var state = (v === 'granted' || v === 'denied') ? v : undefined;
       var bool = toBoolean(v);
       if (bool !== undefined) state = bool ? 'granted' : 'denied';
