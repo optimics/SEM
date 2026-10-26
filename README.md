@@ -100,14 +100,14 @@ Při aktualizaci na verzi 3 zkontrolujte na záložce **Permissions** nové `rea
 
 ## Přechod na verzi 3
 
-Na tuto sekci odkazuje řádek `Seznam SEM [WARN]: v2.x settings in use: … (README "Přechod na v3")`. Všechny změny i s tím, co zkontrolovat, jsou v [CHANGELOG.md](CHANGELOG.md) (3.0.0, Upgrade notes).
+Na tuto sekci odkazuje řádek `Seznam SEM [WARN]: v2.x settings in use: … (README "Přechod na verzi 3")`. Všechny změny i s tím, co zkontrolovat, jsou v [CHANGELOG.md](CHANGELOG.md) (3.0.0, Upgrade notes).
 
 Verze 3 zjednodušuje rozhraní. U *Event data* a *User data* najdete jeden objekt z GTM proměnné a jednu tabulku **Klíč – Hodnota**, kde klíč vybíráte ze seznamu. Nový tag má 21 polí a 4 pole pro BigQuery logging. Volby *User Data input mode* a *Event Data input mode* zmizely; šablona je nikdy nečetla.
 
 Nastavení z verze 2.x se při aktualizaci zachovají, **s výjimkami uvedenými níže**. Dřívější jednotlivá pole, tabulky *Overrides* a dřívější nastavení najdete ve sbalené skupině **Starší pole (v2.x)**. Šablona je dál používá. Když tag některé z nich používá, zapíše při každém spuštění do logu jeden řádek:
 
 ```text
-Seznam SEM [WARN]: v2.x settings in use: userEmail→user_data.em, orderId→event_data.order_id, alias email→em, ga4.orderNo, testMode; move them to the v3 tables/settings (README "Přechod na v3") | trace=…
+Seznam SEM [WARN]: v2.x settings in use: userEmail→user_data.em, orderId→event_data.order_id, alias email→em, ga4.orderNo, testMode; move them to the v3 tables/settings (README "Přechod na verzi 3") | trace=…
 ```
 
 Řádek obsahuje jen názvy, nikdy hodnoty. Loguje se vždy, nezávisle na nastavení Console logging, i když tag skončí chybou. Starší pole ve verzi 3 fungují. Pozdější verze je buď zachová, nebo hit s vyplněným starším polem zastaví s jasným řádkem `[ERROR]`; takovou změnu předem oznámíme v CHANGELOGu.
@@ -156,7 +156,7 @@ Volby *Auto-map event name* a *Strict Event Validation* se v řádku neobjevují
 ### Výjimky – co se změní i při zachované kompatibilitě
 
 - **Názvy událostí z GA4 jen 1:1.** `login`, `add_shipping_info`, `view_item_list`, `select_item` a `view_promotion` se už nemapují; takový tag skončí *Failed* s `[ERROR]` `Unknown event name: ga4:<název>`. Namapujte je přes `From variable` nebo samostatným tagem. `Auto from GA4` mapuje název i bez GA4 prefill; dřívější volba *Auto-map event name* se ignoruje.
-- **Validace je vždy přísná.** Neznámý nebo prázdný název události, chybné SEM ID a neúplný Purchase tag zastaví bez ohledu na *Strict Event Validation*. Má-li tag tuto volbu uloženou vypnutou, řádek `[ERROR]` končí `(v2 loose validation no longer applies)`.
+- **Validace je vždy přísná.** Neznámý název události a SEM ID mimo `^[0-9a-z]{24}$` nově tag zastaví bez ohledu na *Strict Event Validation*; prázdný název, chybějící SEM ID a neúplný Purchase zastavovala už verze 2.3.1. Má-li tag tuto volbu uloženou vypnutou, řádek `[ERROR]` u těchto dvou případů končí `(v2 loose validation no longer applies)`. Název z `Auto from GA4` bez mapování tuto koncovku nemá: verze 2.3.1 ho zastavila jako prázdný název.
 - **`event_id` se už nedoplňuje z `transaction_id`.** Pro deduplikaci s frontendem ho nastavte sami (například `Purchase__` + číslo objednávky). Se zapnutým GA4 prefill, bez `event_id` a s vyplněným `transaction_id` šablona zaloguje warning.
 - **Cookie `sznaiid` ukládá vždy poslední proklik** (last touch) s pevnou platností 30 dní. Dřívější režim a délka platnosti se ignorují; warning se objeví jen tehdy, když by zápis změnily.
 - **IP adresa a User-Agent** v `s2s_headers` se berou z event dat GA4 klienta (`ip_override`, `user_agent`) a teprve bez nich z hlaviček requestu. Brána podle consentu se nemění.
@@ -164,13 +164,8 @@ Volby *Auto-map event name* a *Strict Event Validation* se v řádku neobjevují
 - **WARN se v produkci ve výchozím stavu nelogují.** Console logging `debug` (výchozí) loguje warningy a diagnostiku jen v Preview a debug režimu. Řádky `[ERROR]` a řádek `v2.x settings in use` se logují vždy. Dřívější chování dává úroveň `always`.
 - **Chybný JSON v User Data Object nebo Event Data Object tag nezastaví.** Šablona zaloguje `[ERROR]`, objekt vynechá a hit odešle. Purchase, kterému po sloučení vrstev chybí `order_id`, `currency` nebo `value`, tag dál zastaví.
 - **Chybný JSON v `contents` nebo `product_ids`** (starší pole Contents a Product IDs, tabulka, objekt) se vynechá s warningem. Hodnota z nižší vrstvy se neobnoví: rozbitý JSON ve starším poli Contents už nespadne zpět na `contents` z GA4 nebo z objektu.
+- **Platný JSON string v `contents` nebo `product_ids`** v Event Data Object nebo v řádku Event Data Overrides se nově rozparsuje a odešle; verze 2.3.1 ho vynechala s warningem.
 - **`event_url` bez zdroje se neodešle.** Verze 2.3.1 posílala `event_url: ""`.
-
-### Ověřuje se v GTM před vydáním
-
-- Hodnoty starších polí po importu nové verze a po uložení tagu (přesun do skupiny Starší pole), včetně pole s proměnnou.
-- Uložené *Use Optimistic Scenario* stávajícího tagu po importu a výchozí hodnoty, které GTM doplní do nových polí.
-- Dialog se změnou oprávnění při importu.
 
 ## Vytvoření tagu
 
@@ -266,7 +261,7 @@ Příklady kategorií:
 - `item_category: "A", item_category2: "B"` -> `A | B`
 - `currentCategory: ["A", "B"]` -> `A | B`
 
-Klíče mimo standard GA4 (Shoptet, MeasureHive) šablona ve verzi 3 dál čte: `id`, `orderNo`, `revenue`, `totalWithoutVat` a u položek `id`, `name`, `priceWithVat`, `fullPrice`, `category` s lomítky, `currentCategory`, `defaultCategory`. Když se některý z nich použije, šablona ho uvede v řádku `v2.x settings in use` jako `ga4.<klíč>`, u položek jako `ga4.items.<klíč>` (viz [Přechod na verzi 3](#přechod-na-verzi-3)).
+Klíče mimo standard GA4 (Shoptet, MeasureHive) šablona ve verzi 3 dál čte: `id`, `orderNo`, `revenue`, `totalWithoutVat` a u položek `id`, `name`, `priceWithVat`, `fullPrice`, `category`, `currentCategory`, `defaultCategory`. Když se některý z nich použije, šablona ho uvede v řádku `v2.x settings in use` jako `ga4.<klíč>`, u položek jako `ga4.items.<klíč>` (viz [Přechod na verzi 3](#přechod-na-verzi-3)).
 
 ### Mapování GA4 user_data
 
@@ -676,7 +671,7 @@ Efektivní omezení zápisu řešte přes IAM na sGTM service accountu:
 
 | Problém | Řešení |
 |---|---|
-| Tag skončí jako *Failed* hned, bez requestu | V Console sGTM Preview najděte řádek `Seznam SEM [ERROR]`. Jmenuje pole a problém: chybějící nebo neznámý Event Name, chybějící SEM ID nebo SEM ID mimo `^[0-9a-z]{24}$`, chybný consent, neúplný Purchase. Konec řádku `(v2 loose validation no longer applies)` znamená, že tag má uloženou dřívější volbu Strict Event Validation vypnutou; verze 3 tyto hity zastaví vždy. |
+| Tag skončí jako *Failed* hned, bez requestu | V Console sGTM Preview najděte řádek `Seznam SEM [ERROR]`. Jmenuje pole a problém: chybějící nebo neznámý Event Name, chybějící SEM ID nebo SEM ID mimo `^[0-9a-z]{24}$`, chybný consent, neúplný Purchase. Konec řádku `(v2 loose validation no longer applies)` u neznámého názvu události nebo chybného SEM ID znamená, že tag má uloženou dřívější volbu Strict Event Validation vypnutou: verze 2.3.1 by takový hit odeslala, verze 3 ho zastaví vždy. |
 | `[ERROR] consentModeObject…` nebo `[ERROR] consentString…` | Consent Mode Object nebo Consent String je vyplněný, ale chybný. Opravte mapování proměnné podle sekce [Consent](#consent). |
 | `[ERROR] userDataObject: …; omitting it` (nebo `eventDataObject`) | Objekt není čitelný JSON ani objekt. Šablona ho vynechala a hit odeslala bez jeho hodnot. Opravte proměnnou. |
 | `[ERROR]` na SEM ID | S2S SEM ID musí mít 24 znaků z `0-9` a `a-z`; jiná hodnota tag zastaví. |
@@ -696,4 +691,4 @@ Efektivní omezení zápisu řešte přes IAM na sGTM service accountu:
 | Chybí user_ids | Předávejte minimálně `sid` a `udid` ze `sul.js`, případně zahashované PII. |
 | User data se posílají jako raw PII | Hashování musí proběhnout na frontendu před příchodem do SGTM. Serverová šablona nehashuje. |
 | `sznaiid` se neukládá do cookie | Zkontrolujte, že je zapnuté `persistSznaiidCookie`, request obsahuje `?sznaiid=...`, tag běží mimo GTM preview ping a tag neselhal (cookie se zapisuje až po úspěšné validaci). |
-| API errors | Zkontrolujte S2S SEM ID, payload shape a error logs (obsahují `x-request-id`). Při ladění vypněte optimistic scenario. Request má timeout 5 s. |
+| API errors | Zkontrolujte S2S SEM ID, payload shape a error logs (obsahují `x-request-id`). Tělo chybové odpovědi Seznamu je v diagnostickém řádku Response (Console logging `always`, nebo `debug` v Preview). Při ladění vypněte optimistic scenario. Request má timeout 5 s. |
