@@ -1410,13 +1410,14 @@ function writeSznaiidCookie(value) {
   var maxAge = makeNumber(data.sznaiidCookieMaxAge);
   if (!maxAge || maxAge <= 0) maxAge = 7776000;
 
+  // Option names as documented for setCookie: sameSite ('strict' | 'lax' | 'none') and httpOnly.
   setCookie('sznaiid', value, {
     domain: 'auto',
     path: '/',
-    samesite: 'Lax',
+    sameSite: 'lax',
     secure: true,
     'max-age': maxAge,
-    HttpOnly: false
+    httpOnly: false
   });
 }
 
