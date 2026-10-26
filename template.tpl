@@ -806,8 +806,9 @@ const ALLOWED_EVENTS = [
 
 // Wire type of every event_data key in rtgconv.json; the normalization pass converts each value to it.
 // 'id' = non-empty string (finite numbers are converted, the placeholders 'undefined'/'null' are invalid),
-// 'text' = free text, 'number' = finite number, 'integer' = whole number.
-// sem_id is not listed: it always comes from the S2S SEM ID field.
+// 'text' = free text, 'number' = finite number, 'integer' = whole number, 'boolean' = true/false.
+// product_ids and contents have their own normalizers. sem_id is not listed: it always comes
+// from the S2S SEM ID field.
 const EVENT_DATA_TYPES = {
   sznaiid: 'id',
   order_id: 'id',
@@ -1074,7 +1075,7 @@ function validate(payload) {
     if (data.strictEventValidation) {
       return semIdMsg;
     }
-    logToConsole('Seznam SEM [WARN]: ' + semIdMsg + ' | semId=' + ed.sem_id + ' | trace=' + traceId);
+    warn(semIdMsg + ' | semId=' + ed.sem_id);
   }
 
   if (!contains(ALLOWED_EVENTS, payload.event_name)) {
@@ -1082,7 +1083,7 @@ function validate(payload) {
     if (data.strictEventValidation) {
       return msg;
     }
-    logToConsole('Seznam SEM [WARN]: ' + msg + ' | trace=' + traceId);
+    warn(msg);
   }
 
   // After normalization a present order_id/currency is a non-empty string and value a finite
@@ -1096,7 +1097,7 @@ function validate(payload) {
       return 'Purchase requires: ' + missing.join(', ');
     }
     if (ed.contents === undefined) {
-      logToConsole('Seznam SEM [WARN]: Purchase without contents is accepted by the API but strongly recommended for retargeting/attribution | trace=' + traceId);
+      warn('Purchase without contents is accepted by the API but strongly recommended for retargeting/attribution');
     }
   }
 
@@ -1294,8 +1295,7 @@ function extractFromEventData(data, ev) {
   if (data.autoMapEventData !== false) {
     // Static 1:1 fields (currency, tax→value_tax, shipping→delivery_price, etc.)
     for (var k in GA4_EVENT_DATA_MAP) {
-      if (GA4_EVENT_DATA_MAP.hasOwnProperty(k) && ev.hasOwnProperty(k) &&
-          ev[k] !== undefined && ev[k] !== null && ev[k] !== '') {
+      if (GA4_EVENT_DATA_MAP.hasOwnProperty(k) && ev.hasOwnProperty(k) && !isMissing(ev[k])) {
         out.eventData[GA4_EVENT_DATA_MAP[k]] = ev[k];
       }
     }
@@ -1708,8 +1708,7 @@ function buildEventData(data, parsed, sznaiidValue) {
   }
 
   if (ed.currency !== undefined && ed.currency !== 'CZK') {
-    logToConsole('Seznam SEM [WARN]: currency=' + ed.currency +
-      ' - Seznam SEM currently supports only CZK | trace=' + traceId);
+    warn('currency=' + ed.currency + ' - Seznam SEM currently supports only CZK');
   }
 
   // SEM requires content_type whenever contents is present. Checkout/cart payloads
@@ -1717,7 +1716,7 @@ function buildEventData(data, parsed, sznaiidValue) {
   // Contents emptied by dropped items are omitted, so no content_type is generated for them.
   if (ed.contents !== undefined && ed.content_type === undefined) {
     ed.content_type = 'product';
-    logToConsole('Seznam SEM [WARN]: contents present without content_type; defaulting content_type=product | trace=' + traceId);
+    warn('contents present without content_type; defaulting content_type=product');
   }
 
   // FE-parity convenience: CompleteRegistration defaults to status=true when
