@@ -2659,7 +2659,7 @@ scenarios:
     assertApi('gtmOnFailure').wasCalled();
     assertApi('sendHttpRequest').wasNotCalled();
 
-- name: Unknown event + loose still sends (optimistic - synchronous gtmOnSuccess)
+- name: 'v3: Unknown event with stored loose validation fails with the v2 hint (d.8)'
   code: |-
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     runCode({
@@ -2669,44 +2669,34 @@ scenarios:
       strictEventValidation: false,
       useOptimisticScenario: true
     });
-    // Optimistic mode calls gtmOnSuccess synchronously (before the HTTP response).
-    assertApi('gtmOnSuccess').wasCalled();
-    assertApi('sendHttpRequest').wasCalled();
-
-- name: Invalid JSON in userDataObject fails under strict (synchronous validation)
-  code: |-
-    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
-    runCode({
-      eventNameSelect: 'PageView',
-      semId: 'abcdefghijklmnopqrstuvwx',
-      userDataObject: '{not json',
-      strictEventValidation: true
-    });
+    // v3 is always strict; the stored loose setting only adds the hint to the ERROR line.
     assertApi('gtmOnFailure').wasCalled();
-
-- name: Invalid JSON in eventDataObject fails under strict (synchronous validation)
-  code: |-
-    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
-    runCode({
-      eventNameSelect: 'PageView',
-      semId: 'abcdefghijklmnopqrstuvwx',
-      eventDataObject: '{not json',
-      strictEventValidation: true
-    });
-    assertApi('gtmOnFailure').wasCalled();
+    assertApi('gtmOnSuccess').wasNotCalled();
     assertApi('sendHttpRequest').wasNotCalled();
+    assertThat(logged('Unknown event name: Foo')).isTrue();
+    assertThat(logged('(v2 loose validation no longer applies)')).isTrue();
 
-- name: Invalid JSON in contents fails under strict (synchronous validation)
+- name: 'v3: Invalid JSON in userDataObject is an ERROR, the object is omitted and the hit is sent (d.9)'
   code: |-
-    mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
-    runCode({
-      eventNameSelect: 'PageView',
-      semId: 'abcdefghijklmnopqrstuvwx',
-      contents: '{not json',
-      strictEventValidation: true
-    });
-    assertApi('gtmOnFailure').wasCalled();
-    assertApi('sendHttpRequest').wasNotCalled();
+    runCode(tagData({ userDataObject: '{not json', strictEventValidation: true, logType: 'no' }));
+    assertThat(sent().event_name).isEqualTo('PageView');
+    assertThat(sent().user_ids).isUndefined();
+    assertThat(logged('Seznam SEM [ERROR]: userDataObject: invalid JSON, got string; omitting it')).isTrue();
+    assertSucceeded();
+
+- name: 'v3: Invalid JSON in eventDataObject is an ERROR, the object is omitted and the hit is sent (d.9)'
+  code: |-
+    runCode(tagData({ eventDataObject: '{not json', strictEventValidation: true, logType: 'no' }));
+    assertThat(sent().event_data).isEqualTo({ sem_id: SEM_ID });
+    assertThat(logged('Seznam SEM [ERROR]: eventDataObject: invalid JSON, got string; omitting it')).isTrue();
+    assertSucceeded();
+
+- name: 'v3: Invalid JSON in the Contents field is omitted with a WARN and the hit is sent (d.9)'
+  code: |-
+    runCode(tagData({ contents: '{not json', strictEventValidation: true }));
+    assertThat(sent().event_data.contents).isUndefined();
+    assertThat(logged('event_data.contents: invalid JSON, got string; omitting')).isTrue();
+    assertSucceeded();
 
 - name: Invalid JSON in userDataObject warns under loose (does not crash)
   code: |-
@@ -2989,9 +2979,8 @@ scenarios:
     assertApi('gtmOnFailure').wasCalled();
     assertApi('sendHttpRequest').wasNotCalled();
 
-- name: Short semId + loose still sends with warning (length check)
+- name: 'v3: Short semId with stored loose validation fails (d.8)'
   code: |-
-    // 'BAD' fails the local ^[0-9a-z]{24}$ check: WARN under loose validation, the hit still goes out.
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     runCode({
       eventNameSelect: 'PageView',
@@ -2999,14 +2988,15 @@ scenarios:
       strictEventValidation: false,
       useOptimisticScenario: true
     });
-    assertApi('sendHttpRequest').wasCalled();
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('sendHttpRequest').wasNotCalled();
+    assertThat(logged('semId must be 24 characters')).isTrue();
+    assertThat(logged('(v2 loose validation no longer applies)')).isTrue();
 
-- name: SemId off pattern 24 chars does not crash regression hotfix v211
+- name: 'v3: SemId off pattern 24 chars fails without crashing (hotfix v211, d.8)'
   code: |-
-    // Hotfix regression: the old charCodeAt-based charset check crashed with TypeError
-    // in the SGTM sandbox. The charset check now uses charAt/indexOf. An off-pattern
-    // 24-char string WARNs under loose validation and is still sent; the backend response
-    // (e.g. 400) is irrelevant here: we only verify the tag did not crash and sent the request.
+    // Hotfix regression: the old charCodeAt-based charset check crashed with TypeError in the SGTM
+    // sandbox. The charAt/indexOf check rejects an upper-case 24-char string; v3 always fails on it.
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 400 })));
     runCode({
       eventNameSelect: 'PageView',
@@ -3014,7 +3004,8 @@ scenarios:
       strictEventValidation: false,
       useOptimisticScenario: true
     });
-    assertApi('sendHttpRequest').wasCalled();
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('sendHttpRequest').wasNotCalled();
 
 - name: Non-CZK currency sends with warning (regression P2-2)
   code: |-
@@ -3077,13 +3068,13 @@ scenarios:
     assertThat(capturedCookieWrite.options.httpOnly).isEqualTo(false);
     assertThat(capturedCookieWrite.options.secure).isEqualTo(true);
 
-- name: sznaiid cookie NOT overwritten on second event (first_touch) (v22 cookie-3)
+- name: 'v3: sznaiid cookie is overwritten by a new click whatever the stored mode (v22 cookie-3, d.3)'
   code: |-
-    let setCookieCalled = false;
+    let capturedCookieWrite;
     mock('sendHttpRequest', () => Promise.create((r) => r({ statusCode: 200 })));
     mock('getAllEventData', () => ({ page_location: 'https://shop.example/lp?sznaiid=NEWVAL' }));
     mock('getCookieValues', (name) => name === 'sznaiid' ? ['EXISTING'] : []);
-    mock('setCookie', () => { setCookieCalled = true; });
+    mock('setCookie', (name, value, options) => { capturedCookieWrite = { name: name, value: value, options: options }; });
     runCode({
       eventNameSelect: 'PageView',
       semId: 'abcdefghijklmnopqrstuvwx',
@@ -3092,7 +3083,8 @@ scenarios:
       sznaiidCookieMaxAge: '7776000',
       useOptimisticScenario: false
     });
-    assertThat(setCookieCalled).isEqualTo(false);
+    assertThat(capturedCookieWrite.value).isEqualTo('NEWVAL');
+    assertThat(capturedCookieWrite.options['max-age']).isEqualTo(2592000);
 
 - name: sznaiid cookie overwritten under last_touch mode (v22 cookie-4)
   code: |-
@@ -3451,11 +3443,13 @@ scenarios:
     }
     assertThat(found).isEqualTo(true);
 
-- name: Outgoing request includes X-Client-Id and X-Client-Version headers (v221 headers-1)
+- name: 'v3: Outgoing request includes X-Client-Id and X-Client-Version 3.0.0 (v221 headers-1, d.12)'
   code: |-
     let capturedOpts;
+    let capturedBody;
     mock('sendHttpRequest', (url, opts, body) => {
       capturedOpts = opts;
+      capturedBody = JSON.parse(body);
       return Promise.create((r) => r({ statusCode: 200 }));
     });
     runCode({
@@ -3464,7 +3458,8 @@ scenarios:
       useOptimisticScenario: false
     });
     assertThat(capturedOpts.headers['X-Client-Id']).isEqualTo('gtm-server-template-seznam-sem');
-    assertThat(capturedOpts.headers['X-Client-Version']).isEqualTo('2.3.1');
+    assertThat(capturedOpts.headers['X-Client-Version']).isEqualTo('3.0.0');
+    assertThat(capturedBody.api.template_version).isEqualTo('3.0.0');
 
 - name: userDataObject with FE aliases - email phone fname mapped to em ph fn (v221 alias-1)
   code: |-
@@ -4261,17 +4256,17 @@ scenarios:
     runCode(tagData({ consentModeObject: { ad_storage: 'granted', ad_user_data: 'granted' } }));
     assertThat(sent().s2s_headers).isUndefined();
 
-- name: P0 sznaiid - cookie uses sameSite lax, httpOnly false and the 90-day default
+- name: 'v3: sznaiid - cookie uses sameSite lax, httpOnly false and the fixed 30-day lifetime (d.3)'
   code: |-
     mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
     mock('getCookieValues', () => []);
-    runCode(tagData({}));
+    runCode(tagData({ sznaiidCookieMaxAge: '7776000' }));
     assertApi('setCookie').wasCalledWith('sznaiid', 'CLICK', {
       domain: 'auto',
       path: '/',
       sameSite: 'lax',
       secure: true,
-      'max-age': 7776000,
+      'max-age': 2592000,
       httpOnly: false
     });
     assertThat(sent().event_data.sznaiid).isEqualTo('CLICK');
@@ -4359,12 +4354,12 @@ scenarios:
     assertFailedWithoutRequest();
     assertThat(logged('semId must be 24 characters')).isTrue();
 
-- name: P0 sem_id - wrong charset WARNs and still sends under loose validation
+- name: 'v3: sem_id - wrong charset fails even without Strict Event Validation (d.8)'
   code: |-
     runCode(tagData({ semId: 'abcdefghijklmnopqrstuvw-' }));
-    assertThat(sent().event_data.sem_id).isEqualTo('abcdefghijklmnopqrstuvw-');
+    assertFailedWithoutRequest();
     assertThat(logged('semId must be 24 characters')).isTrue();
-    assertSucceeded();
+    assertThat(logged('(v2 loose validation no longer applies)')).isFalse();
 
 - name: P0 sem_id - the object and overrides cannot replace the configured SEM ID
   code: |-
@@ -4374,11 +4369,12 @@ scenarios:
     }));
     assertThat(sent().event_data.sem_id).isEqualTo(SEM_ID);
 
-- name: P0 diagnostics - test mode logs the consent summary, raw x-ga-gcs and identity sources
+- name: 'v3: diagnostics - logType always logs the consent summary, raw x-ga-gcs and identity sources in production (d.7)'
   code: |-
+    containerVersion = { debugMode: false, previewMode: false };
     mock('getAllEventData', { 'x-ga-gcs': 'G111' });
     mock('getCookieValues', (name) => name === 'sid' ? [VALID_SID] : []);
-    runCode(tagData({ testMode: true, consentModeObject: { ad_storage: 'granted' }, consentString: TCF_STRING }));
+    runCode(tagData({ logType: 'always', consentModeObject: { ad_storage: 'granted' }, consentString: TCF_STRING }));
     let requestLine = '';
     for (let n = 0; n < logs.length; n++) {
       if (logs[n].indexOf('"Type":"Request"') !== -1) requestLine = logs[n];
@@ -4401,7 +4397,7 @@ scenarios:
     assertThat(sent().event_data.order_id).isEqualTo('NO-1');
     assertSucceeded();
 
-- name: P0 R4 - GA4 transaction_id and item_id 0 are sent as the string 0
+- name: 'v3: R4 - GA4 transaction_id and item_id 0 are sent as the string 0, transaction_id is not an event_id (d.2)'
   code: |-
     mock('getAllEventData', {
       transaction_id: 0,
@@ -4411,7 +4407,7 @@ scenarios:
     });
     runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
     assertThat(sent().event_data.order_id).isStrictlyEqualTo('0');
-    assertThat(sent().event_id).isStrictlyEqualTo('0');
+    assertThat(sent().event_id).isUndefined();
     assertThat(sent().event_data.contents).isEqualTo([{ id: '0', quantity: 1 }]);
     assertSucceeded();
 
@@ -4544,11 +4540,12 @@ scenarios:
     assertThat(sent().event_data).isEqualTo({ sem_id: SEM_ID });
     assertSucceeded();
 
-- name: P0 R12 - boolean false in a JSON object field is an input error under Strict
+- name: 'v3: R12 - boolean false in a JSON object field is an ERROR and the hit is sent (d.9)'
   code: |-
     runCode(tagData({ strictEventValidation: true, userDataObject: false }));
-    assertFailedWithoutRequest();
-    assertThat(logs).contains('Seznam SEM [ERROR]: userDataObject: expected object or JSON string, got boolean');
+    assertThat(sent().event_name).isEqualTo('PageView');
+    assertThat(logged('Seznam SEM [ERROR]: userDataObject: expected object or JSON string, got boolean; omitting it')).isTrue();
+    assertSucceeded();
 
 - name: P0 contents - native items without an id are kept
   code: |-
@@ -4734,10 +4731,20 @@ scenarios:
         sec_ch_ua_platform: '"macOS"'
       }
     };
+    // v3 differences allowed by V3-SPEC (e): d.12 version; d.4 IP and User-Agent from the event data.
+    expected.api.template_version = '3.0.0';
+    expected.s2s_headers.client_ip_address = '198.51.100.20';
+    expected.s2s_headers.user_agent = 'Mozilla/5.0 (event data)';
     assertThat(sent()).isEqualTo(expected);
     assertThat(requests[0].raw).isEqualTo(JSON.stringify(expected));
     assertApi('gtmOnSuccess').wasCalled();
     assertApi('setCookie').wasNotCalled();
+    assertThat(legacyLines().length).isEqualTo(1);
+    assertThat(legacyLines()[0]).contains('in use: userEmail→user_data.em, userPhone→user_data.ph, ' +
+      'userFirstName→user_data.fn, userLastName→user_data.ln, userCity→user_data.ct, userZip→user_data.zp, ' +
+      'userStreet→user_data.sr, currency→event_data.currency, value→event_data.value, ' +
+      'valueTax→event_data.value_tax, orderId→event_data.order_id, contentType→event_data.content_type, ' +
+      'contents→event_data.contents, statusEnabled→event_data.status;');
     callLater(() => {
       assertThat(bigQueryRows.length).isEqualTo(1);
       assertThat(bigQueryRows[0].request_body).isEqualTo(requests[0].raw);
@@ -4827,11 +4834,15 @@ scenarios:
         }
       }
     };
-    const expectedCookie = { domain: 'auto', path: '/', sameSite: 'lax', secure: true, 'max-age': 7776000, httpOnly: false };
+    // v3 differences allowed by V3-SPEC (e): d.12 version; d.3 fixed 30-day cookie lifetime.
+    expected.api.template_version = '3.0.0';
+    const expectedCookie = { domain: 'auto', path: '/', sameSite: 'lax', secure: true, 'max-age': 2592000, httpOnly: false };
     assertThat(sent()).isEqualTo(expected);
     assertThat(requests[0].raw).isEqualTo(JSON.stringify(expected));
     assertApi('setCookie').wasCalledWith('sznaiid', 'CLICK-17', expectedCookie);
     assertApi('gtmOnSuccess').wasCalled();
+    assertThat(legacyLines()).isEqualTo(['Seznam SEM [WARN]: v2.x settings in use: sznaiidCookieMaxAge; ' +
+      'move them to the v3 tables/settings (README "Přechod na v3") | trace=TRACE-17']);
 
 - name: upgrade fixture - every legacy field filled
   code: |-
@@ -4977,7 +4988,9 @@ scenarios:
       },
       s2s_headers: { client_ip_address: '203.0.113.9', user_agent: 'Mozilla/5.0 (request header)' }
     };
-    const expectedCookie = { domain: 'auto', path: '/', sameSite: 'lax', secure: true, 'max-age': 7776000, httpOnly: false };
+    // v3 differences allowed by V3-SPEC (e): d.12 version; d.3 fixed 30-day cookie lifetime.
+    expected.api.template_version = '3.0.0';
+    const expectedCookie = { domain: 'auto', path: '/', sameSite: 'lax', secure: true, 'max-age': 2592000, httpOnly: false };
     assertThat(sent()).isEqualTo(expected);
     assertThat(requests[0].raw).isEqualTo(JSON.stringify(expected));
     assertApi('setCookie').wasCalledWith('sznaiid', 'URL-CLICK', expectedCookie);
@@ -5042,10 +5055,694 @@ scenarios:
       },
       s2s_headers: { client_ip_address: '203.0.113.21', user_agent: 'Mozilla/5.0 (request header)' }
     };
-    const expectedCookie = { domain: 'auto', path: '/', sameSite: 'lax', secure: true, 'max-age': 7776000, httpOnly: false };
+    // v3 differences allowed by V3-SPEC (e): d.12 version; d.3 fixed 30-day cookie lifetime.
+    expected.api.template_version = '3.0.0';
+    const expectedCookie = { domain: 'auto', path: '/', sameSite: 'lax', secure: true, 'max-age': 2592000, httpOnly: false };
     assertThat(sent()).isEqualTo(expected);
     assertThat(requests[0].raw).isEqualTo(JSON.stringify(expected));
     assertApi('setCookie').wasCalledWith('sznaiid', 'OLD-CLICK', expectedCookie);
+    assertSucceeded();
+
+- name: v3 tables - event and user data table rows build the payload
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'Purchase',
+      eventDataTable: rows({ order_id: 'O-1', currency: 'CZK', value: '100.50', status: 'true', goods_phase: '2' }),
+      userDataTable: rows({ em: 'HASH_EM', sid: VALID_SID, udid: VALID_UDID + '@1782277561803' })
+    }));
+    assertThat(sent().event_data).isEqualTo({
+      order_id: 'O-1',
+      currency: 'CZK',
+      value: 100.5,
+      status: true,
+      goods_phase: 2,
+      sem_id: SEM_ID
+    });
+    assertThat(sent().user_ids.user_data).isEqualTo({ em: 'HASH_EM', sid: VALID_SID, udid: VALID_UDID });
+    assertThat(legacyLines()).isEqualTo([]);
+    assertSucceeded();
+
+- name: v3 legacy F1 - each of the 14 legacy user fields maps to its user_data key
+  code: |-
+    // Independent parameter -> wire table (MIGRATION section 3, rows 16-29).
+    const FIELDS = [
+      ['sid', 'sid', VALID_SID],
+      ['userUdid', 'udid', VALID_UDID],
+      ['userEmail', 'em', 'HASH_EM'],
+      ['userPhone', 'ph', 'HASH_PH'],
+      ['userFirstName', 'fn', 'HASH_FN'],
+      ['userLastName', 'ln', 'HASH_LN'],
+      ['userGender', 'ge', 'HASH_GE'],
+      ['userDob', 'db', 'HASH_DB'],
+      ['userCity', 'ct', 'HASH_CT'],
+      ['userRegion', 'region', 'HASH_REGION'],
+      ['userZip', 'zp', 'HASH_ZP'],
+      ['userStreet', 'sr', 'HASH_SR'],
+      ['userCountry', 'country', 'HASH_COUNTRY'],
+      ['userSubscriptionId', 'subscription_id', 'SUB-1']
+    ];
+    const fields = {};
+    for (let i = 0; i < FIELDS.length; i++) fields[FIELDS[i][0]] = FIELDS[i][2];
+    runCode(legacyTagData(fields));
+    const userData = sent().user_ids.user_data;
+    const line = legacyLines()[0];
+    for (let i = 0; i < FIELDS.length; i++) {
+      assertThat(userData[FIELDS[i][1]], FIELDS[i][0]).isEqualTo(FIELDS[i][2]);
+      assertThat(line).contains(FIELDS[i][0] + '→user_data.' + FIELDS[i][1]);
+    }
+    assertThat(legacyLines().length).isEqualTo(1);
+
+- name: v3 legacy F1 - each of the 17 legacy event fields maps to its event_data key
+  code: |-
+    // Independent parameter -> wire table (MIGRATION section 3, rows 33-49): field, key, input, sent value.
+    const FIELDS = [
+      ['sznaiid', 'sznaiid', 'SZN-1', 'SZN-1'],
+      ['currency', 'currency', 'CZK', 'CZK'],
+      ['value', 'value', '100.5', 100.5],
+      ['orderId', 'order_id', 'O-1', 'O-1'],
+      ['contentType', 'content_type', 'product_group', 'product_group'],
+      ['contents', 'contents', '[{"id":"A","quantity":2}]', [{ id: 'A', quantity: 2 }]],
+      ['deliveryPrice', 'delivery_price', '99', 99],
+      ['deliveryType', 'delivery_type', 'PPL', 'PPL'],
+      ['paymentType', 'payment_type', 'card', 'card'],
+      ['otherCosts', 'other_costs', '10', 10],
+      ['predictedLtv', 'predicted_ltv', '5000', 5000],
+      ['valueTax', 'value_tax', '21', 21],
+      ['reviewEmail', 'review_email', 'jan@example.cz', 'jan@example.cz'],
+      ['productIds', 'product_ids', '[1,2]', [1, 2]],
+      ['goodsIntention', 'goods_intention', '0.5', 0.5],
+      ['goodsPhase', 'goods_phase', '3', 3],
+      ['searchString', 'search_string', 'mixér', 'mixér']
+    ];
+    const fields = {};
+    for (let i = 0; i < FIELDS.length; i++) fields[FIELDS[i][0]] = FIELDS[i][2];
+    runCode(legacyTagData(fields));
+    const eventData = sent().event_data;
+    const line = legacyLines()[0];
+    for (let i = 0; i < FIELDS.length; i++) {
+      assertThat(eventData[FIELDS[i][1]], FIELDS[i][0]).isEqualTo(FIELDS[i][3]);
+      assertThat(line).contains(FIELDS[i][0] + '→event_data.' + FIELDS[i][1]);
+    }
+
+- name: v3 legacy F2 - event data precedence is table, override, field, object, GA4
+  code: |-
+    mock('getAllEventData', {
+      currency: 'EUR',
+      value: 1,
+      transaction_id: 'GA4-ORDER',
+      items: [{ item_id: 'GA4-ITEM', quantity: 1 }]
+    });
+    runCode(legacyTagData({
+      eventNameSelect: 'Purchase',
+      enableGa4AutoMap: true,
+      eventDataObject: { value: 2, currency: 'USD', order_id: 'OBJECT-ORDER', status: true, delivery_type: 'OBJECT' },
+      value: '3',
+      currency: 'GBP',
+      orderId: 'FIELD-ORDER',
+      goodsPhase: '2',
+      deliveryType: '',
+      eventDataOverrides: [
+        { name: 'value', value: '4' },
+        { name: 'currency', value: 'CZK' },
+        { name: 'delivery_type', value: 'OVERRIDE' }
+      ],
+      eventDataTable: [
+        { key: 'value', value: '5' },
+        { key: 'currency', value: 'undefined' },
+        { key: 'status', value: false },
+        { key: 'goods_phase', value: 0 },
+        { key: 'contents', value: [] }
+      ]
+    }));
+    assertThat(sent().event_data).isEqualTo({
+      currency: 'CZK',
+      order_id: 'FIELD-ORDER',
+      contents: [],
+      value: 5,
+      status: false,
+      delivery_type: 'OVERRIDE',
+      goods_phase: 0,
+      content_type: 'product',
+      sem_id: SEM_ID
+    });
+    assertThat(logged('event_data.currency is the placeholder string')).isTrue();
+
+- name: v3 legacy F2 - user data precedence is table, override, field, object, GA4
+  code: |-
+    mock('getAllEventData', { user_data: { sha256_email_address: 'GA4_EM', sha256_phone_number: 'GA4_PH' } });
+    runCode(legacyTagData({
+      enableGa4AutoMap: true,
+      userDataObject: { em: 'OBJECT_EM', ph: 'OBJECT_PH', fn: 'OBJECT_FN', ct: 'OBJECT_CT' },
+      userEmail: 'FIELD_EM',
+      userPhone: 'FIELD_PH',
+      userFirstName: '   ',
+      userCity: 'null',
+      userDataOverrides: [{ name: 'em', value: 'OVERRIDE_EM' }, { name: 'ph', value: 'OVERRIDE_PH' }],
+      userDataTable: [{ key: 'em', value: 'TABLE_EM' }, { key: 'ph', value: 'null' }]
+    }));
+    assertThat(sent().user_ids.user_data).isEqualTo({
+      em: 'TABLE_EM',
+      ph: 'OVERRIDE_PH',
+      fn: 'OBJECT_FN',
+      ct: 'OBJECT_CT'
+    });
+
+- name: v3 legacy F3 - Include status decides whether the legacy Status field applies
+  code: |-
+    runCode(legacyTagData({ eventNameSelect: 'Subscribe', statusEnabled: true }));
+    runCode(legacyTagData({ eventNameSelect: 'Subscribe', statusEnabled: true, status: 'false' }));
+    runCode(legacyTagData({ eventNameSelect: 'Subscribe', statusEnabled: false, status: 'true' }));
+    assertThat(requests.length).isEqualTo(3);
+    assertThat(requests[0].body.event_data.status).isStrictlyEqualTo(false);
+    assertThat(requests[1].body.event_data.status).isStrictlyEqualTo(false);
+    assertThat(requests[2].body.event_data.status).isUndefined();
+    const lines = legacyLines();
+    assertThat(lines.length).isEqualTo(2);
+    assertThat(lines[0]).contains('statusEnabled→event_data.status');
+
+- name: v3 legacy F3 - CompleteRegistration gets status true only when no layer supplies one
+  code: |-
+    runCode(tagData({ eventNameSelect: 'CompleteRegistration' }));
+    runCode(tagData({ eventNameSelect: 'CompleteRegistration', eventDataTable: rows({ status: 'false' }) }));
+    runCode(legacyTagData({ eventNameSelect: 'CompleteRegistration', statusEnabled: true }));
+    assertThat(requests[0].body.event_data.status).isStrictlyEqualTo(true);
+    assertThat(requests[1].body.event_data.status).isStrictlyEqualTo(false);
+    assertThat(requests[2].body.event_data.status).isStrictlyEqualTo(false);
+
+- name: v3 legacy F4 - userState applies and is reported only while userRegion is unset
+  code: |-
+    runCode(legacyTagData({ userRegion: 'null', userState: 'HASH_STATE', userEmail: 'HASH_EM' }));
+    runCode(legacyTagData({ userRegion: 'HASH_REGION', userState: 'HASH_STATE' }));
+    assertThat(requests[0].body.user_ids.user_data.region).isEqualTo('HASH_STATE');
+    assertThat(requests[1].body.user_ids.user_data.region).isEqualTo('HASH_REGION');
+    const lines = legacyLines();
+    assertThat(lines[0]).contains('userState→user_data.region');
+    assertThat(lines[0]).doesNotContain('userRegion');
+    assertThat(lines[1]).contains('userRegion→user_data.region');
+    assertThat(lines[1]).doesNotContain('userState');
+
+- name: v3 legacy F5 - aliases keep the P0 payload and are reported
+  code: |-
+    runCode(tagData({ userDataObject: { email: 'HASH_EM', phone: 'HASH_PH', em: 'HASH_CANONICAL', zip: 'HASH_ZP' } }));
+    assertThat(sent().user_ids.user_data).isEqualTo({ em: 'HASH_CANONICAL', ph: 'HASH_PH', zp: 'HASH_ZP' });
+    assertThat(legacyLines()[0]).contains('alias email→em, alias phone→ph, alias zip→zp');
+
+- name: v3 legacy F5 - GA4 platform keys keep the P0 payload and are reported once each
+  code: |-
+    mock('getAllEventData', {
+      id: 'SHOPTET-ORDER',
+      revenue: 250,
+      items: [
+        { id: 'A', name: 'Name A', priceWithVat: 121, category: 'X/Y', quantity: 1 },
+        { id: 'B', name: 'Name B', priceWithVat: 60.5, quantity: 2 },
+        { item_id: 'C', fullPrice: 10, currentCategory: 'Current', quantity: 1 },
+        { item_id: 'D', price: 5, defaultCategory: ['Books', 'Fiction'], quantity: 1 }
+      ]
+    });
+    runCode(tagData({ eventNameSelect: 'AddToCart', enableGa4AutoMap: true }));
+    assertThat(sent().event_data).isEqualTo({
+      order_id: 'SHOPTET-ORDER',
+      contents: [
+        { id: 'A', content_name: 'Name A', unit_price: 121, quantity: 1, content_category: 'X | Y' },
+        { id: 'B', content_name: 'Name B', unit_price: 60.5, quantity: 2 },
+        { id: 'C', unit_price: 10, quantity: 1, content_category: 'Current' },
+        { id: 'D', unit_price: 5, quantity: 1, content_category: 'Books | Fiction' }
+      ],
+      value: 250,
+      content_type: 'product',
+      sem_id: SEM_ID
+    });
+    const line = legacyLines()[0];
+    assertThat(line).contains('ga4.id, ga4.items.id, ga4.items.name, ga4.items.priceWithVat, ga4.items.category, ' +
+      'ga4.items.fullPrice, ga4.items.currentCategory, ga4.items.defaultCategory, ga4.revenue');
+    assertThat(line.split('ga4.items.priceWithVat').length).isEqualTo(2);
+
+- name: v3 legacy F5 - GA4 orderNo and totalWithoutVat are reported
+  code: |-
+    mock('getAllEventData', { orderNo: 'NO-1', totalWithoutVat: 175, currency: 'CZK' });
+    runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
+    assertThat(sent().event_data).isEqualTo({ currency: 'CZK', order_id: 'NO-1', value: 175, sem_id: SEM_ID });
+    assertThat(legacyLines()[0]).contains('ga4.orderNo, ga4.totalWithoutVat');
+
+- name: v3 legacy F6 - one aggregated WARN per execution, without values, in the fixed order
+  code: |-
+    mock('getRequestHeader', (name) => name === 'trace-id' ? 'TRACE-6' : undefined);
+    mock('getAllEventData', { orderNo: 'NO-1' });
+    runCode(legacyTagData({
+      testMode: true,
+      enableGa4AutoMap: true,
+      orderId: 'ORDER-SECRET',
+      userEmail: 'HASH_SECRET',
+      userDataObject: { email: 'HASH_ALIAS_SECRET' },
+      userDataOverrides: [{ name: 'ph', value: 'HASH_OVERRIDE_SECRET' }]
+    }));
+    assertThat(legacyLines()).isEqualTo([
+      'Seznam SEM [WARN]: v2.x settings in use: userEmail→user_data.em, orderId→event_data.order_id, ' +
+      'userDataOverrides, alias email→em, ga4.orderNo, testMode; move them to the v3 tables/settings ' +
+      '(README "Přechod na v3") | trace=TRACE-6'
+    ]);
+    assertThat(legacyLines()[0]).doesNotContain('SECRET');
+    assertSucceeded();
+
+- name: v3 legacy F6 - default-valued v2.x settings and the fresh v3 defaults report nothing
+  code: |-
+    runCode(legacyTagData({}));
+    runCode(freshTagDefaults({ eventDataTable: rows({ currency: 'CZK' }) }));
+    runCode(legacyTagData({ statusEnabled: false, status: 'true', userDataOverrides: [{ name: 'em', value: '' }] }));
+    assertThat(requests.length).isEqualTo(3);
+    assertThat(legacyLines()).isEqualTo([]);
+
+- name: v3 legacy F7 - testMode forces diagnostics even with logType no
+  code: |-
+    containerVersion = { debugMode: false, previewMode: false };
+    runCode(legacyTagData({ testMode: true, logType: 'no', currency: 'EUR' }));
+    assertThat(logged('"Type":"Request"')).isTrue();
+    assertThat(logged('currency=EUR')).isTrue();
+    assertThat(legacyLines()[0]).contains('testMode');
+    callLater(() => { assertThat(logged('"Type":"Response"')).isTrue(); });
+
+- name: v3 legacy F7 - logType debug in production logs no WARN or diagnostics, ERROR always
+  code: |-
+    containerVersion = { debugMode: false, previewMode: false };
+    runCode(tagData({ logType: 'debug', userDataObject: '{bad', eventDataTable: rows({ currency: 'EUR' }) }));
+    assertThat(sent().event_data.currency).isEqualTo('EUR');
+    assertThat(logged('[WARN]')).isFalse();
+    assertThat(logged('"Type":"Request"')).isFalse();
+    assertThat(logged('[ERROR]: userDataObject: invalid JSON')).isTrue();
+    callLater(() => { assertThat(logged('"Type":"Response"')).isFalse(); });
+
+- name: v3 legacy F9 - stored loose validation adds the hint to an incomplete Purchase ERROR
+  code: |-
+    runCode(legacyTagData({ eventNameSelect: 'Purchase', orderId: 'O-1', currency: 'CZK' }));
+    assertFailedWithoutRequest();
+    assertThat(logged('Purchase requires: value')).isTrue();
+    assertThat(logged('(v2 loose validation no longer applies)')).isTrue();
+
+- name: v3 legacy F9 - Strict Event Validation on or unset adds no hint
+  code: |-
+    runCode(tagData({ eventNameSelect: 'from_variable', eventNameFromVariable: 'Foo', strictEventValidation: true }));
+    runCode(tagData({ eventNameSelect: 'from_variable', eventNameFromVariable: 'Foo' }));
+    assertThat(requests.length).isEqualTo(0);
+    assertThat(logged('Unknown event name: Foo')).isTrue();
+    assertThat(logged('(v2 loose validation no longer applies)')).isFalse();
+
+- name: v3 d.1 - Auto from GA4 maps the 13 one-to-one names without GA4 prefill
+  code: |-
+    const NAMES = [
+      ['page_view', 'PageView'], ['view_item', 'ViewContent'], ['search', 'Search'],
+      ['view_search_results', 'Search'], ['add_to_cart', 'AddToCart'], ['add_to_wishlist', 'AddToWishlist'],
+      ['begin_checkout', 'InitiateCheckout'], ['add_payment_info', 'AddPaymentInfo'], ['purchase', 'Purchase'],
+      ['generate_lead', 'Lead'], ['sign_up', 'CompleteRegistration'], ['subscribe', 'Subscribe'],
+      ['contact', 'Contact']
+    ];
+    for (let i = 0; i < NAMES.length; i++) {
+      mock('getAllEventData', { event_name: NAMES[i][0] });
+      runCode(tagData({ eventNameSelect: 'auto', eventDataTable: rows({ order_id: 'O-1', currency: 'CZK', value: 1 }) }));
+    }
+    assertThat(requests.length).isEqualTo(NAMES.length);
+    for (let i = 0; i < NAMES.length; i++) {
+      assertThat(requests[i].body.event_name, NAMES[i][0]).isEqualTo(NAMES[i][1]);
+    }
+
+- name: v3 d.1 - the removed GA4 names fail with Unknown event name, even with the v2.3 auto-map settings
+  code: |-
+    const REMOVED = ['login', 'add_shipping_info', 'view_item_list', 'select_item', 'view_promotion'];
+    for (let i = 0; i < REMOVED.length; i++) {
+      mock('getAllEventData', { event_name: REMOVED[i] });
+      runCode(legacyTagData({ eventNameSelect: 'auto', enableGa4AutoMap: true, autoMapEventName: true }));
+      assertThat(logged('Unknown event name: ga4:' + REMOVED[i]), REMOVED[i]).isTrue();
+    }
+    assertThat(requests.length).isEqualTo(0);
+
+- name: v3 d.1 O6 - Auto from GA4 without prefill maps the name but fills no payload fields
+  code: |-
+    mock('getAllEventData', {
+      event_name: 'purchase',
+      page_location: 'https://shop.example/ga4-page',
+      transaction_id: 'GA4-ORDER',
+      currency: 'EUR',
+      value: 999,
+      items: [{ item_id: 'GA4', quantity: 1 }]
+    });
+    runCode(tagData({
+      eventNameSelect: 'auto',
+      eventUrl: '',
+      eventDataTable: rows({ order_id: 'TABLE-ORDER', currency: 'CZK', value: '100' })
+    }));
+    assertThat(sent().event_name).isEqualTo('Purchase');
+    assertThat(sent().event_url).isUndefined();
+    assertThat(sent().event_data).isEqualTo({ order_id: 'TABLE-ORDER', currency: 'CZK', value: 100, sem_id: SEM_ID });
+
+- name: v3 O6 - an explicit event name wins over the GA4 event_name with prefill on
+  code: |-
+    mock('getAllEventData', { event_name: 'purchase', currency: 'CZK' });
+    runCode(tagData({ eventNameSelect: 'PageView', enableGa4AutoMap: true }));
+    assertThat(sent().event_name).isEqualTo('PageView');
+    assertThat(sent().event_data.currency).isEqualTo('CZK');
+
+- name: v3 O6 - an unsupported auto name fails once without request or cookie
+  code: |-
+    mock('getAllEventData', { event_name: 'login', page_location: 'https://shop.example/?sznaiid=CLICK' });
+    runCode(tagData({ eventNameSelect: 'auto', enableGa4AutoMap: true }));
+    assertFailedWithoutRequest();
+    assertThat(logged('Seznam SEM [ERROR]: Unknown event name: ga4:login')).isTrue();
+
+- name: v3 O6 - auto with no inbound event_name fails without request
+  code: |-
+    mock('getAllEventData', {});
+    runCode(tagData({ eventNameSelect: 'auto' }));
+    assertFailedWithoutRequest();
+    assertThat(logged('Seznam SEM [ERROR]: eventName is required')).isTrue();
+
+- name: v3 d.2 - transaction_id is not used as event_id and the gap is warned
+  code: |-
+    mock('getAllEventData', { transaction_id: 'TX-1', currency: 'CZK', value: 10 });
+    runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
+    assertThat(sent().event_id).isUndefined();
+    assertThat(sent().event_data.order_id).isEqualTo('TX-1');
+    assertThat(logged('transaction_id is no longer used as event_id; set Event ID')).isTrue();
+
+- name: v3 d.2 - GA4 event_id or an explicit Event ID silence the transaction_id WARN
+  code: |-
+    mock('getAllEventData', { event_id: 'EV-1', transaction_id: 'TX-1', currency: 'CZK', value: 10 });
+    runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
+    mock('getAllEventData', { transaction_id: 'TX-2', currency: 'CZK', value: 10 });
+    runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true, eventId: 'Purchase__TX-2' }));
+    assertThat(requests[0].body.event_id).isEqualTo('EV-1');
+    assertThat(requests[1].body.event_id).isEqualTo('Purchase__TX-2');
+    assertThat(logged('transaction_id is no longer used as event_id')).isFalse();
+
+- name: v3 d.4 - IP and User-Agent come from the event data first, Client Hints from the headers
+  code: |-
+    mock('getRequestHeader', (name) => ({
+      'x-forwarded-for': '1.2.3.4, 10.0.0.1',
+      'user-agent': 'header-ua',
+      'sec-ch-ua': '"Chromium";v="141"'
+    })[name]);
+    mock('getAllEventData', { ip_override: ' 198.51.100.1 ', user_agent: 'event-ua' });
+    runCode(tagData({ sendS2sHeaders: true, consentModeObject: { ad_storage: 'granted', ad_user_data: 'granted' } }));
+    assertThat(sent().s2s_headers).isEqualTo({
+      client_ip_address: '198.51.100.1',
+      user_agent: 'event-ua',
+      sec_ch_ua: '"Chromium";v="141"'
+    });
+
+- name: v3 d.4 - blank event data values fall back to the request headers, consent still gates them
+  code: |-
+    mockClientHeaders();
+    mock('getAllEventData', { ip_override: '  ', user_agent: '' });
+    runCode(tagData({ sendS2sHeaders: true, consentModeObject: { ad_storage: 'granted', ad_user_data: 'granted' } }));
+    runCode(tagData({ sendS2sHeaders: true, consentModeObject: { ad_storage: 'granted', ad_user_data: 'denied' } }));
+    assertThat(requests[0].body.s2s_headers).isEqualTo({ client_ip_address: '1.2.3.4', user_agent: 'test-ua' });
+    assertThat(requests[1].body.s2s_headers).isUndefined();
+
+- name: v3 d.5 - an unset Use Optimistic Scenario waits for Seznam's answer
+  code: |-
+    httpResult = { statusCode: 500, headers: {}, body: '' };
+    const fields = tagData({});
+    fields.useOptimisticScenario = undefined;
+    runCode(fields);
+    assertApi('gtmOnSuccess').wasNotCalled();
+    assertFailedAfterResponse();
+
+- name: v3 d.5 - a stored true stays optimistic
+  code: |-
+    httpResult = { statusCode: 500, headers: {}, body: '' };
+    runCode(legacyTagData({ useOptimisticScenario: true }));
+    assertApi('gtmOnSuccess').wasCalled();
+    callLater(() => { assertApi('gtmOnFailure').wasNotCalled(); });
+
+- name: v3 d.7 - fresh defaults in production drop WARN lines, Preview keeps them
+  code: |-
+    containerVersion = { debugMode: false, previewMode: false };
+    runCode(freshTagDefaults({ eventDataTable: rows({ currency: 'EUR' }) }));
+    const productionLogs = logs.length;
+    containerVersion = { debugMode: false, previewMode: true };
+    runCode(freshTagDefaults({ eventDataTable: rows({ currency: 'EUR' }) }));
+    assertThat(requests.length).isEqualTo(2);
+    assertThat(productionLogs).isEqualTo(0);
+    assertThat(logged('currency=EUR')).isTrue();
+
+- name: v3 d.7 - an unavailable container version counts as production for logType debug
+  code: |-
+    containerVersion = undefined;
+    runCode(tagData({ logType: 'debug', eventDataTable: rows({ currency: 'EUR' }) }));
+    assertThat(sent().event_data.currency).isEqualTo('EUR');
+    assertThat(logged('[WARN]')).isFalse();
+
+- name: v3 O4 - logging matrix of logType, container mode and testMode
+  code: |-
+    // Each run has an ordinary WARN (EUR), the always-on ERROR of a malformed object and an active
+    // legacy field. WARN lines and diagnostics follow the level; ERROR and the legacy line never do.
+    const LEVELS = ['no', 'debug', 'always'];
+    const MODES = [
+      { debugMode: false, previewMode: false },
+      { debugMode: true, previewMode: false },
+      { debugMode: false, previewMode: true }
+    ];
+    for (let l = 0; l < LEVELS.length; l++) {
+      for (let m = 0; m < MODES.length; m++) {
+        for (let t = 0; t < 2; t++) {
+          containerVersion = MODES[m];
+          const start = logs.length;
+          runCode(legacyTagData({
+            logType: LEVELS[l],
+            testMode: t === 1,
+            userDataObject: '{bad',
+            userEmail: 'HASH_EM',
+            currency: 'EUR'
+          }));
+          const runLogs = logs.slice(start);
+          const label = LEVELS[l] + '/' + m + '/testMode=' + (t === 1);
+          const expectVerbose = t === 1 || LEVELS[l] === 'always' || (LEVELS[l] === 'debug' && m > 0);
+          let warns = 0;
+          let requestLines = 0;
+          let errors = 0;
+          let legacy = 0;
+          for (let n = 0; n < runLogs.length; n++) {
+            if (runLogs[n].indexOf('v2.x settings in use') !== -1) legacy++;
+            else if (runLogs[n].indexOf('[WARN]') !== -1) warns++;
+            if (runLogs[n].indexOf('"Type":"Request"') !== -1) requestLines++;
+            if (runLogs[n].indexOf('[ERROR]: userDataObject') !== -1) errors++;
+          }
+          assertThat(warns > 0, label + ' WARN').isEqualTo(expectVerbose);
+          assertThat(requestLines, label + ' diagnostics').isEqualTo(expectVerbose ? 1 : 0);
+          assertThat(errors, label + ' ERROR').isEqualTo(1);
+          assertThat(legacy, label + ' legacy line').isEqualTo(1);
+        }
+      }
+    }
+    assertThat(requests.length).isEqualTo(18);
+
+- name: v3 O4 - a literal hasOwnProperty key is an ordinary unknown key
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'AddToCart',
+      userDataObject: { hasOwnProperty: 'x', em: 'HASH_EM' },
+      eventDataObject: { hasOwnProperty: 1, currency: 'CZK', contents: [{ id: 'A', hasOwnProperty: 2 }] },
+      consentModeObject: { hasOwnProperty: 'x', ad_storage: 'granted' },
+      userDataTable: [{ key: 'hasOwnProperty', value: 'y' }]
+    }));
+    assertThat(sent().user_ids.user_data).isEqualTo({ em: 'HASH_EM' });
+    assertThat(sent().event_data).isEqualTo({
+      currency: 'CZK',
+      contents: [{ id: 'A', quantity: 1 }],
+      content_type: 'product',
+      sem_id: SEM_ID
+    });
+    assertThat(sent().consent_mode).isEqualTo({ ad_storage: 'granted' });
+    assertThat(logged('user_data.hasOwnProperty is not a Seznam field')).isTrue();
+    assertThat(logged('event_data.hasOwnProperty is not a Seznam field')).isTrue();
+    assertThat(logged('event_data.contents[0].hasOwnProperty is not a Seznam field')).isTrue();
+    assertSucceeded();
+
+- name: v3 O1 - fresh v3 defaults with a landing click report no cookie tuning
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    mock('getCookieValues', (name) => name === 'sznaiid' ? ['OLD'] : []);
+    runCode(freshTagDefaults({}));
+    assertApi('setCookie').wasCalledWith('sznaiid', 'CLICK', {
+      domain: 'auto',
+      path: '/',
+      sameSite: 'lax',
+      secure: true,
+      'max-age': 2592000,
+      httpOnly: false
+    });
+    assertThat(legacyLines()).isEqualTo([]);
+
+- name: v3 O1 - upgraded first_touch and 90-day settings are reported when the click replaces a cookie
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    mock('getCookieValues', (name) => name === 'sznaiid' ? ['OLD'] : []);
+    runCode(legacyTagData({}));
+    assertThat(legacyLines()[0]).contains('persistSznaiidCookieMode, sznaiidCookieMaxAge');
+    assertApi('setCookie').wasCalled();
+
+- name: v3 O1 - first_touch is not reported without an existing cookie, the lifetime is
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    mock('getCookieValues', () => []);
+    runCode(legacyTagData({}));
+    assertThat(legacyLines()[0]).contains('sznaiidCookieMaxAge');
+    assertThat(legacyLines()[0]).doesNotContain('persistSznaiidCookieMode');
+
+- name: v3 O1 - a repeated identical click refreshes the cookie and reports first_touch
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=SAME' });
+    mock('getCookieValues', (name) => name === 'sznaiid' ? ['SAME'] : []);
+    runCode(legacyTagData({ sznaiidCookieMaxAge: '2592000' }));
+    assertApi('setCookie').wasCalledWith('sznaiid', 'SAME', {
+      domain: 'auto',
+      path: '/',
+      sameSite: 'lax',
+      secure: true,
+      'max-age': 2592000,
+      httpOnly: false
+    });
+    assertThat(legacyLines()[0]).contains('persistSznaiidCookieMode');
+    assertThat(legacyLines()[0]).doesNotContain('sznaiidCookieMaxAge');
+
+- name: v3 O1 - no cookie write, persistence off or a preview ping report no cookie tuning
+  code: |-
+    mock('getCookieValues', (name) => name === 'sznaiid' ? ['OLD'] : []);
+    mock('getAllEventData', { page_location: 'https://shop.example/no-click' });
+    runCode(legacyTagData({ sznaiidCookieMaxAge: 'abc' }));
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    runCode(legacyTagData({ persistSznaiidCookie: false, sznaiidCookieMaxAge: 'abc' }));
+    mock('getAllEventData', { page_location: 'https://gtm-msr.appspot.com/render?sznaiid=CLICK' });
+    runCode(legacyTagData({ sznaiidCookieMaxAge: 'abc' }));
+    assertThat(requests.length).isEqualTo(3);
+    assertApi('setCookie').wasNotCalled();
+    assertThat(legacyLines()).isEqualTo([]);
+
+- name: v3 O1 - a non-numeric stored lifetime is reported when a cookie is written
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    mock('getCookieValues', () => []);
+    runCode(legacyTagData({ sznaiidCookieMaxAge: 'abc' }));
+    assertThat(legacyLines()[0]).contains('sznaiidCookieMaxAge');
+
+- name: v3 O1 O2 - a failed hit plans no cookie write and reports no cookie tuning
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    mock('getCookieValues', (name) => name === 'sznaiid' ? ['OLD'] : []);
+    runCode(legacyTagData({ eventNameSelect: 'Purchase', orderId: 'O-1', currency: 'CZK', logType: 'no' }));
+    assertFailedWithoutRequest();
+    assertThat(legacyLines()).isEqualTo(['Seznam SEM [WARN]: v2.x settings in use: currency→event_data.currency, ' +
+      'orderId→event_data.order_id; move them to the v3 tables/settings (README "Přechod na v3") | trace=undefined']);
+
+- name: v3 O2 - an incomplete Purchase flushes the legacy line once with logType no
+  code: |-
+    containerVersion = { debugMode: false, previewMode: false };
+    mock('getAllEventData', { orderNo: 'NO-1', items: [{ id: 'A', quantity: 1 }, { id: 'B', quantity: 1 }] });
+    runCode(legacyTagData({
+      eventNameSelect: 'Purchase',
+      logType: 'no',
+      enableGa4AutoMap: true,
+      userEmail: 'HASH_EM',
+      currency: 'CZK'
+    }));
+    assertFailedWithoutRequest();
+    assertThat(legacyLines().length).isEqualTo(1);
+    assertThat(legacyLines()[0]).contains('userEmail→user_data.em, currency→event_data.currency, ga4.orderNo, ga4.items.id;');
+    assertThat(logged('[WARN]: Purchase')).isFalse();
+    assertThat(logged('Seznam SEM [ERROR]: Purchase requires: value')).isTrue();
+
+- name: v3 O2 - an invalid SEM ID flushes the legacy line once
+  code: |-
+    runCode(legacyTagData({ semId: 'BAD', logType: 'no', orderId: 'O-1' }));
+    assertFailedWithoutRequest();
+    assertThat(legacyLines().length).isEqualTo(1);
+    assertThat(legacyLines()[0]).contains('orderId→event_data.order_id');
+
+- name: v3 O2 - a consent failure reports only the legacy items resolved before it
+  code: |-
+    runCode(legacyTagData({ testMode: true, userEmail: 'HASH_EM', consentModeObject: { ad_storage: 'yes' } }));
+    assertFailedWithoutRequest();
+    assertThat(legacyLines().length).isEqualTo(1);
+    assertThat(legacyLines()[0]).contains('in use: testMode;');
+    assertThat(logs).contains('Seznam SEM [ERROR]: consentModeObject.ad_storage: expected granted/denied (or true/false, 1/0), got string');
+
+- name: v3 O3 - a broken Contents string wins over valid GA4 contents and is omitted
+  code: |-
+    mock('getAllEventData', { items: [{ item_id: 'GA4', quantity: 1 }] });
+    runCode(tagData({ eventNameSelect: 'AddToCart', enableGa4AutoMap: true, contents: '[broken' }));
+    assertThat(sent().event_data.contents).isUndefined();
+    assertThat(logged('event_data.contents: invalid JSON, got string; omitting')).isTrue();
+    assertSucceeded();
+
+- name: v3 O3 - table array values accept native arrays, JSON strings and an explicit empty list
+  code: |-
+    mock('getAllEventData', { items: [{ item_id: 'GA4', quantity: 1 }] });
+    runCode(tagData({ enableGa4AutoMap: true, eventDataTable: [{ key: 'contents', value: [{ id: 'A', quantity: '2' }] }] }));
+    runCode(tagData({ enableGa4AutoMap: true, eventDataTable: rows({ contents: '[{"id":"B"}]', product_ids: '[1,"2"]' }) }));
+    runCode(tagData({ enableGa4AutoMap: true, eventDataTable: rows({ contents: '[]' }) }));
+    assertThat(requests[0].body.event_data.contents).isEqualTo([{ id: 'A', quantity: 2 }]);
+    assertThat(requests[1].body.event_data.contents).isEqualTo([{ id: 'B', quantity: 1 }]);
+    assertThat(requests[1].body.event_data.product_ids).isEqualTo([1, 2]);
+    assertThat(requests[2].body.event_data.contents).isEqualTo([]);
+
+- name: v3 O3 - malformed, wrong-shape, false and 0 array values are omitted without restoring lower layers
+  code: |-
+    const BAD = ['[broken', '{"id":"A"}', false, 0, '"text"'];
+    for (let i = 0; i < BAD.length; i++) {
+      runCode(tagData({
+        eventDataObject: { contents: [{ id: 'OBJECT', quantity: 1 }], product_ids: [7] },
+        eventDataTable: [{ key: 'contents', value: BAD[i] }, { key: 'product_ids', value: BAD[i] }]
+      }));
+      assertThat(requests[i].body.event_data.contents, 'contents ' + i).isUndefined();
+      assertThat(requests[i].body.event_data.product_ids, 'product_ids ' + i).isUndefined();
+    }
+    assertThat(logged('event_data.contents: invalid JSON, got string; omitting')).isTrue();
+    assertThat(logged('event_data.contents: expected array, got object; omitting')).isTrue();
+    assertThat(logged('event_data.product_ids: expected array, got boolean; omitting')).isTrue();
+
+- name: v3 O3 - duplicate table keys use the last row, unknown keys and sem_id are dropped
+  code: |-
+    runCode(tagData({
+      eventDataTable: [
+        { key: 'currency', value: 'EUR' },
+        { key: 'currency', value: 'CZK' },
+        { key: 'unknown_key', value: 'x' },
+        { key: 'sem_id', value: 'zzzzzzzzzzzzzzzzzzzzzzzz' },
+        { key: '', value: 'no key' }
+      ]
+    }));
+    assertThat(sent().event_data).isEqualTo({ currency: 'CZK', sem_id: SEM_ID });
+    assertThat(logged('event_data.unknown_key is not a Seznam field')).isTrue();
+
+- name: v3 O3 d.9 - a malformed Event Data Object does not stop a valid GA4 Purchase
+  code: |-
+    mock('getAllEventData', { transaction_id: 'TX-1', currency: 'CZK', value: 100 });
+    runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true, eventDataObject: '{"order_id":' }));
+    assertThat(sent().event_data).isEqualTo({ currency: 'CZK', order_id: 'TX-1', value: 100, sem_id: SEM_ID });
+    assertThat(logged('[ERROR]: eventDataObject: invalid JSON, got string; omitting it')).isTrue();
+    assertSucceeded();
+
+- name: v3 O3 d.9 - an object-only Purchase with a malformed object fails final validation
+  code: |-
+    runCode(tagData({ eventNameSelect: 'Purchase', eventDataObject: '{"order_id":"O-1","currency":"CZK"' }));
+    assertFailedWithoutRequest();
+    assertThat(logged('[ERROR]: eventDataObject: invalid JSON, got string; omitting it')).isTrue();
+    assertThat(logged('Purchase requires: order_id, currency, value')).isTrue();
+
+- name: v3 O7 d.14 - a blank or placeholder Event URL falls back to page_location and the Referer
+  code: |-
+    mock('getRequestHeader', (name) => name === 'referer' ? 'https://shop.example/from-referer' : undefined);
+    runCode(tagData({ eventUrl: '   ' }));
+    mock('getAllEventData', { page_location: 'https://shop.example/from-ga4' });
+    runCode(tagData({ eventUrl: 'undefined', enableGa4AutoMap: true }));
+    runCode(tagData({ eventUrl: { href: 'https://shop.example/object' } }));
+    assertThat(requests[0].body.event_url).isEqualTo('https://shop.example/from-referer');
+    assertThat(requests[1].body.event_url).isEqualTo('https://shop.example/from-ga4');
+    assertThat(requests[2].body.event_url).isEqualTo('https://shop.example/from-referer');
+
+- name: v3 O7 d.14 - without any URL source event_url is not serialized
+  code: |-
+    runCode(tagData({ eventUrl: undefined }));
+    assertThat(requests[0].raw.indexOf('event_url')).isEqualTo(-1);
+    assertThat(logged('event_url is empty')).isTrue();
     assertSucceeded();
 setup: |-
   // Sandboxed test code has no JSON, Promise or callLater globals; require them like the template does.
@@ -5074,7 +5771,13 @@ setup: |-
   mock('logToConsole', (message) => { logs.push(message); });
   mock('setCookie', () => {});
 
-  // Tag fields for a valid PageView that waits for the API response; `extra` adds or replaces fields.
+  // Scenarios run as in GTM Preview, where logType 'debug' logs WARN lines. Set containerVersion to a
+  // production container (or undefined) to test the logging levels.
+  let containerVersion = { debugMode: false, previewMode: true };
+  mock('getContainerVersion', () => containerVersion);
+
+  // Fields of a v3 tag for a valid PageView that waits for the API response; event and user data go
+  // into the tables (rows()). `extra` adds or replaces fields.
   function tagData(extra) {
     const fields = {
       eventNameSelect: 'PageView',
@@ -5086,10 +5789,82 @@ setup: |-
     return fields;
   }
 
+  // Key-value table rows of eventDataTable / userDataTable, in the order of `values`.
+  function rows(values) {
+    const list = [];
+    for (const key in values) list.push({ key: key, value: values[key] });
+    return list;
+  }
+
+  // A tag as v2.3 stored it with its defaults and Individual fields (the legacy group in v3). Only
+  // useOptimisticScenario differs from the v2.3 default, so the scenario sees Seznam's answer.
+  function legacyTagData(extra) {
+    const fields = {
+      eventNameSelect: 'PageView',
+      semId: SEM_ID,
+      eventUrl: 'https://shop.example/',
+      eventSource: 'web',
+      enableGa4AutoMap: false,
+      autoMapEventName: false,
+      autoMapUserData: true,
+      autoMapEventData: true,
+      userDataInputMode: 'fields',
+      eventDataInputMode: 'fields',
+      autoMapIdsFromCookies: true,
+      statusEnabled: false,
+      testMode: false,
+      useOptimisticScenario: false,
+      strictEventValidation: false,
+      sendS2sHeaders: true,
+      persistSznaiidCookie: true,
+      persistSznaiidCookieMode: 'first_touch',
+      sznaiidCookieMaxAge: '7776000',
+      bigQueryLogType: 'no'
+    };
+    for (const key in extra) fields[key] = extra[key];
+    return fields;
+  }
+
+  // A freshly created v3 tag: every defaultValue of ___TEMPLATE_PARAMETERS___, plus the SEM ID and URL.
+  function freshTagDefaults(extra) {
+    const fields = {
+      eventNameSelect: 'PageView',
+      semId: SEM_ID,
+      eventUrl: 'https://shop.example/',
+      enableGa4AutoMap: false,
+      autoMapUserData: true,
+      autoMapEventData: true,
+      autoMapIdsFromCookies: true,
+      sendS2sHeaders: true,
+      persistSznaiidCookie: true,
+      useOptimisticScenario: false,
+      eventSource: 'web',
+      logType: 'debug',
+      bigQueryLogType: 'no',
+      autoMapEventName: false,
+      statusEnabled: false,
+      testMode: false,
+      strictEventValidation: false,
+      persistSznaiidCookieMode: 'last_touch',
+      sznaiidCookieMaxAge: ''
+    };
+    for (const key in extra) fields[key] = extra[key];
+    return fields;
+  }
+
   // Parsed body of the request; asserts that exactly one request was made.
   function sent() {
     assertThat(requests.length, 'number of requests').isEqualTo(1);
     return requests[0].body;
+  }
+
+  // The aggregated v2.x legacy WARN lines of the scenario.
+  function legacyLines() {
+    const found = [];
+    for (let n = 0; n < logs.length; n++) {
+      if (logs[n].indexOf('v2.x settings in use') !== -1) found.push(logs[n]);
+    }
+    return found;
   }
 
   function logged(fragment) {
