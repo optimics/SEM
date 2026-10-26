@@ -4908,7 +4908,7 @@ scenarios:
     assertApi('setCookie').wasCalledWith('sznaiid', 'CLICK-17', expectedCookie);
     assertApi('gtmOnSuccess').wasCalled();
     assertThat(legacyLines()).isEqualTo(['Seznam SEM [WARN]: v2.x settings in use: sznaiidCookieMaxAge; ' +
-      'move them to the v3 tables/settings (README "Přechod na v3") | trace=TRACE-17']);
+      'move them to the v3 tables/settings (README "Přechod na verzi 3") | trace=TRACE-17']);
 
 - name: upgrade fixture - every legacy field filled
   code: |-
@@ -5372,7 +5372,7 @@ scenarios:
     assertThat(legacyLines()).isEqualTo([
       'Seznam SEM [WARN]: v2.x settings in use: userEmail→user_data.em, orderId→event_data.order_id, ' +
       'userDataOverrides, alias email→em, ga4.orderNo, testMode; move them to the v3 tables/settings ' +
-      '(README "Přechod na v3") | trace=TRACE-6'
+      '(README "Přechod na verzi 3") | trace=TRACE-6'
     ]);
     assertThat(legacyLines()[0]).doesNotContain('SECRET');
     assertSucceeded();
@@ -5704,7 +5704,7 @@ scenarios:
     runCode(legacyTagData({ eventNameSelect: 'Purchase', orderId: 'O-1', currency: 'CZK', logType: 'no' }));
     assertFailedWithoutRequest();
     assertThat(legacyLines()).isEqualTo(['Seznam SEM [WARN]: v2.x settings in use: currency→event_data.currency, ' +
-      'orderId→event_data.order_id; move them to the v3 tables/settings (README "Přechod na v3") | trace=undefined']);
+      'orderId→event_data.order_id; move them to the v3 tables/settings (README "Přechod na verzi 3")']);
 
 - name: v3 O2 - an incomplete Purchase flushes the legacy line once with logType no
   code: |-
@@ -5989,6 +5989,30 @@ scenarios:
     assertThat(sent().event_data.content_type).isEqualTo('product');
     assertThat(logged('expected array, got string')).isFalse();
     assertSucceeded();
+
+- name: v3 N1 - without a trace-id header the WARN, legacy and validation lines carry no trace suffix
+  code: |-
+    runCode(legacyTagData({ eventNameSelect: 'Purchase', orderId: 'O-1', userDataObject: '{bad' }));
+    assertFailedWithoutRequest();
+    assertThat(logged('[ERROR]: userDataObject: invalid JSON, got string; omitting it')).isTrue();
+    assertThat(logged('[ERROR]: Purchase requires: currency, value | event=Purchase')).isTrue();
+    assertThat(logged('[WARN]: no consent signal')).isTrue();
+    assertThat(legacyLines().length).isEqualTo(1);
+    assertThat(logged('trace=')).isFalse();
+
+- name: v3 N1 - without a trace-id header the HTTP, transport and BigQuery ERROR lines carry no trace suffix
+  code: |-
+    httpResult = { statusCode: 500, headers: {}, body: '' };
+    bigQueryRejection = [{ reason: 'invalid' }];
+    runAtEveryLogLevel();
+    httpResult = 'reject';
+    runAtEveryLogLevel();
+    callLater(() => {
+      assertThat(logged('[ERROR]: HTTP 500 | event=PageView | semId=' + SEM_ID + ' | request_id=undefined')).isTrue();
+      assertThat(logged('[ERROR]: request to Seznam failed: timed_out | event=PageView')).isTrue();
+      assertThat(logged('[ERROR]: BigQuery insert failed: invalid | rows=1')).isTrue();
+      assertThat(logged('trace=')).isFalse();
+    });
 setup: |-
   // Sandboxed test code has no JSON, Promise or callLater globals; require them like the template does.
   const JSON = require('JSON');
