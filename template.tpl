@@ -830,6 +830,10 @@ const EVENT_DATA_TYPES = {
   contents: 'contents'
 };
 
+// Free text: the words 'undefined' and 'null' are kept literally here; in every other key
+// they are placeholders from a broken variable mapping and count as not supplied (R8).
+const FREE_TEXT_KEYS = ['search_string', 'content_name', 'content_category'];
+
 const CONTENT_ITEM_TYPES = {
   id: 'id',
   quantity: 'quantity',
@@ -1457,7 +1461,10 @@ function buildPayload(data, parsed, consent, sznaiidValue) {
     }
   };
 
-  setNormalized(payload, 'event_id', 'id', isMissing(data.eventId) ? ga4.eventId : data.eventId, 'event_id');
+  var eventId = {};
+  addLayerValue(eventId, '', 'event_id', ga4.eventId);
+  addLayerValue(eventId, '', 'event_id', data.eventId);
+  setNormalized(payload, 'event_id', 'id', eventId.event_id, 'event_id');
 
   if (hasProperties(consent.mode)) {
     payload.consent_mode = consent.mode;
@@ -1537,7 +1544,7 @@ function isAliasKey(key) {
 // - Alias keys are NEVER copied to output; they are translated to canonical (Pass 2).
 // - WARN logs once per alias key that is present AND non-empty, regardless of
 //   whether canonical wins — this helps users discover canonical names.
-// - Canonical wins when present (uses isMissing).
+// - Canonical wins when supplied (uses isUnset: a placeholder canonical value loses).
 function normalizeUserDataObject(source) {
   if (!source) return source;
   var out = {};
@@ -1554,11 +1561,11 @@ function normalizeUserDataObject(source) {
     var entry = USER_DATA_ALIAS_MAP[i];
     if (!source.hasOwnProperty(entry.alias)) continue;
     var aliasVal = source[entry.alias];
-    if (isMissing(aliasVal)) continue;
+    if (isUnset(aliasVal)) continue;
     logToConsole('Seznam SEM [WARN]: userDataObject.' + entry.alias +
       ' is a frontend-template alias - prefer canonical key "' + entry.canonical +
       '" for clarity | trace=' + traceId);
-    if (isMissing(out[entry.canonical])) {
+    if (isUnset(out[entry.canonical])) {
       out[entry.canonical] = aliasVal;
     }
   }
@@ -1570,32 +1577,32 @@ function buildUserData(data, parsedUserDataObject) {
   var merged = {};
 
   // Layer 0: GA4 auto-mapped sha256_* fields (no-op when auto-map disabled).
-  mergeObject(merged, ga4.userData);
+  mergeObject(merged, ga4.userData, 'user_data.');
 
   // Layer 1: object variable, with FE-template alias normalization.
   if (parsedUserDataObject) {
-    mergeObject(merged, normalizeUserDataObject(parsedUserDataObject));
+    mergeObject(merged, normalizeUserDataObject(parsedUserDataObject), 'user_data.');
   }
 
   // Layer 2: individual fields
-  addIfPresent(merged, 'sid', data.sid);
-  addIfPresent(merged, 'em', data.userEmail);
-  addIfPresent(merged, 'ph', data.userPhone);
-  addIfPresent(merged, 'fn', data.userFirstName);
-  addIfPresent(merged, 'ln', data.userLastName);
-  addIfPresent(merged, 'ge', data.userGender);
-  addIfPresent(merged, 'db', data.userDob);
-  addIfPresent(merged, 'ct', data.userCity);
+  addLayerValue(merged, 'user_data.', 'sid', data.sid);
+  addLayerValue(merged, 'user_data.', 'em', data.userEmail);
+  addLayerValue(merged, 'user_data.', 'ph', data.userPhone);
+  addLayerValue(merged, 'user_data.', 'fn', data.userFirstName);
+  addLayerValue(merged, 'user_data.', 'ln', data.userLastName);
+  addLayerValue(merged, 'user_data.', 'ge', data.userGender);
+  addLayerValue(merged, 'user_data.', 'db', data.userDob);
+  addLayerValue(merged, 'user_data.', 'ct', data.userCity);
   // `userState` retained as deprecated runtime fallback (UI renamed to `userRegion`, wire key `region`).
-  addIfPresent(merged, 'region', data.userRegion || data.userState);
-  addIfPresent(merged, 'zp', data.userZip);
-  addIfPresent(merged, 'sr', data.userStreet);
-  addIfPresent(merged, 'country', data.userCountry);
-  addIfPresent(merged, 'subscription_id', data.userSubscriptionId);
-  addIfPresent(merged, 'udid', data.userUdid);
+  addLayerValue(merged, 'user_data.', 'region', data.userRegion || data.userState);
+  addLayerValue(merged, 'user_data.', 'zp', data.userZip);
+  addLayerValue(merged, 'user_data.', 'sr', data.userStreet);
+  addLayerValue(merged, 'user_data.', 'country', data.userCountry);
+  addLayerValue(merged, 'user_data.', 'subscription_id', data.userSubscriptionId);
+  addLayerValue(merged, 'user_data.', 'udid', data.userUdid);
 
   // Layer 3: override table
-  applyOverrides(merged, data.userDataOverrides);
+  applyOverrides(merged, data.userDataOverrides, 'user_data.');
 
   // One typed normalization pass: unknown keys are dropped, every value is a non-empty string.
   var userData = {};
@@ -1664,33 +1671,33 @@ function buildEventData(data, parsed, sznaiidValue) {
   var merged = {};
 
   // Layer 0: GA4 auto-mapped fields, including contents from items[] (no-op when auto-map disabled).
-  mergeObject(merged, ga4.eventData);
+  mergeObject(merged, ga4.eventData, 'event_data.');
 
   // Layer 1: object variable
-  mergeObject(merged, parsed.eventData.value);
+  mergeObject(merged, parsed.eventData.value, 'event_data.');
 
   // Layer 1b: sznaiid fallback from cookie / URL.
   // Manual data.sznaiid (Layer 2 below) overrides this.
   if (sznaiidValue && isMissing(merged.sznaiid)) merged.sznaiid = sznaiidValue;
 
   // Layer 2: individual fields. Values are converted to their wire types below.
-  addIfPresent(merged, 'sznaiid', data.sznaiid);
-  addIfPresent(merged, 'currency', data.currency);
-  addIfPresent(merged, 'value', data.value);
-  addIfPresent(merged, 'value_tax', data.valueTax);
-  addIfPresent(merged, 'order_id', data.orderId);
-  addIfPresent(merged, 'content_type', data.contentType);
-  addIfPresent(merged, 'delivery_price', data.deliveryPrice);
-  addIfPresent(merged, 'delivery_type', data.deliveryType);
-  addIfPresent(merged, 'payment_type', data.paymentType);
-  addIfPresent(merged, 'other_costs', data.otherCosts);
-  addIfPresent(merged, 'predicted_ltv', data.predictedLtv);
-  addIfPresent(merged, 'goods_intention', data.goodsIntention);
-  addIfPresent(merged, 'goods_phase', data.goodsPhase);
-  addIfPresent(merged, 'search_string', data.searchString);
-  addIfPresent(merged, 'review_email', data.reviewEmail); // NOT hashed - intentional (Zbozi.cz survey).
-  addIfPresent(merged, 'product_ids', parsed.productIds.value);
-  addIfPresent(merged, 'contents', parsed.contents.value);
+  addLayerValue(merged, 'event_data.', 'sznaiid', data.sznaiid);
+  addLayerValue(merged, 'event_data.', 'currency', data.currency);
+  addLayerValue(merged, 'event_data.', 'value', data.value);
+  addLayerValue(merged, 'event_data.', 'value_tax', data.valueTax);
+  addLayerValue(merged, 'event_data.', 'order_id', data.orderId);
+  addLayerValue(merged, 'event_data.', 'content_type', data.contentType);
+  addLayerValue(merged, 'event_data.', 'delivery_price', data.deliveryPrice);
+  addLayerValue(merged, 'event_data.', 'delivery_type', data.deliveryType);
+  addLayerValue(merged, 'event_data.', 'payment_type', data.paymentType);
+  addLayerValue(merged, 'event_data.', 'other_costs', data.otherCosts);
+  addLayerValue(merged, 'event_data.', 'predicted_ltv', data.predictedLtv);
+  addLayerValue(merged, 'event_data.', 'goods_intention', data.goodsIntention);
+  addLayerValue(merged, 'event_data.', 'goods_phase', data.goodsPhase);
+  addLayerValue(merged, 'event_data.', 'search_string', data.searchString);
+  addLayerValue(merged, 'event_data.', 'review_email', data.reviewEmail); // NOT hashed - intentional (Zbozi.cz survey).
+  addLayerValue(merged, 'event_data.', 'product_ids', parsed.productIds.value);
+  addLayerValue(merged, 'event_data.', 'contents', parsed.contents.value);
 
   // status: boolean; `statusEnabled` flag distinguishes "not set" from false.
   if (data.statusEnabled) {
@@ -1698,7 +1705,7 @@ function buildEventData(data, parsed, sznaiidValue) {
   }
 
   // Layer 3: override table
-  applyOverrides(merged, data.eventDataOverrides);
+  applyOverrides(merged, data.eventDataOverrides, 'event_data.');
 
   // One typed normalization pass over the merged layers: unknown keys are dropped, every
   // value is converted to its wire type, invalid optional values are omitted with a WARN.
@@ -1769,7 +1776,8 @@ function setNormalized(obj, key, type, value, path) {
   if (normalized !== undefined) obj[key] = normalized;
 }
 
-// Contents from every source (GA4 items, object, field, overrides). A missing quantity becomes 1;
+// Contents from every source (GA4 items, object, field, overrides). A missing quantity, or the
+// placeholder 'undefined'/'null' (R7), becomes 1;
 // an item whose quantity is present but not an integer >= 1 (0, negative, fractional,
 // non-numeric, non-finite) is dropped with a WARN and the other items are kept. An explicit []
 // stays []; when dropping empties a non-empty list, contents are omitted.
@@ -1789,7 +1797,7 @@ function normalizeContents(list, path) {
     var content = { quantity: 1 };
     var keep = true;
     for (var key in item) {
-      if (!item.hasOwnProperty(key) || isMissing(item[key])) continue;
+      if (!item.hasOwnProperty(key) || isUnsupplied(itemPath + '.' + key, key, item[key])) continue;
       if (!CONTENT_ITEM_TYPES.hasOwnProperty(key)) {
         warn(itemPath + '.' + key + ' is not a Seznam field, dropping');
       } else if (key === 'quantity') {
@@ -1873,10 +1881,14 @@ function isMissing(v) {
   return v === undefined || v === null || (getType(v) === 'string' && v.trim() === '');
 }
 
-// Strings a broken variable mapping produces. They count as missing for IDs and consent,
+// Strings a broken variable mapping produces. They count as missing for IDs, numbers and consent,
 // never for free text.
 function isPlaceholder(v) {
   return getType(v) === 'string' && (v.trim() === 'undefined' || v.trim() === 'null');
+}
+
+function isUnset(v) {
+  return isMissing(v) || isPlaceholder(v);
 }
 
 // Type description for WARN/ERROR lines; never includes the value itself.
@@ -1992,27 +2004,39 @@ function isValidSemId(id) {
   return true;
 }
 
-// Override rows: later rows win. A row with a missing value is ignored; false and 0 are values.
+// Override rows: later rows win, with the layer rule of addLayerValue(); false and 0 are values.
 // Values keep their raw type here and are converted by the normalization pass.
-function applyOverrides(obj, table) {
+function applyOverrides(obj, table, prefix) {
   if (!table) return;
   for (var i = 0; i < table.length; i++) {
     var row = table[i];
-    if (row && row.name && !isMissing(row.value)) {
-      obj[row.name] = row.value;
-    }
+    if (row && row.name) addLayerValue(obj, prefix, row.name, row.value);
   }
 }
 
-// Copies the present values of `source` onto `target`. A missing value (undefined, null, '')
-// in a later layer never erases a value from an earlier layer.
-function mergeObject(target, source) {
+// Copies the supplied values of `source` onto `target` (see addLayerValue).
+function mergeObject(target, source, prefix) {
   if (!source) return;
   for (var key in source) {
-    if (source.hasOwnProperty(key) && !isMissing(source[key])) {
-      target[key] = source[key];
-    }
+    if (source.hasOwnProperty(key)) addLayerValue(target, prefix, key, source[key]);
   }
+}
+
+// The merge contract (R8): a value that is not supplied never erases an earlier layer. Genuinely
+// invalid supplied values still override and are then normalized and validated.
+function addLayerValue(target, prefix, key, value) {
+  if (!isUnsupplied(prefix + key, key, value)) target[key] = value;
+}
+
+// Not supplied: missing, or a placeholder ('undefined'/'null') in any key except free text.
+// A skipped placeholder is reported, because it points at a broken variable mapping.
+function isUnsupplied(path, key, value) {
+  if (isMissing(value)) return true;
+  if (isPlaceholder(value) && !contains(FREE_TEXT_KEYS, key)) {
+    warn(path + ' is the placeholder string "' + value.trim() + '"; treating it as missing');
+    return true;
+  }
+  return false;
 }
 
 // Object.keys is not available in sandboxed JS, so we iterate manually
