@@ -372,7 +372,7 @@ ___TEMPLATE_PARAMETERS___
         "checkboxText": "Auto-map sid & udid from request cookies (fallback)",
         "simpleValueType": true,
         "defaultValue": true,
-        "help": "When on, sid and udid are read from the inbound request cookies ('sid', 'udid') as a LOWEST-priority fallback — only when not already provided by the SID/UDID fields, User Data Object, or overrides, or when the provided value is malformed. Explicit and cookie values pass the same shape check. The 'udid' cookie's '<uuid>@<timestamp>' suffix is stripped to the canonical uuid. The 'sid' cookie value contains '=' but is read whole. Note: Seznam SID is NEVER taken from GA4 event_data, because GA4's 'sid' query param is the GA4 session id, not the Seznam SID. Requires same-site (first-party) SGTM so cookies reach the server; on Safari the 'sid' cookie may be absent (ITP)."
+        "help": "When on, sid and udid are read from the inbound request cookies ('sid', 'udid') as a LOWEST-priority fallback — only when not already provided by the SID/UDID fields, User Data Object, or overrides, or when the provided value is malformed. Explicit and cookie values pass the same shape check. The 'udid' cookie's '<uuid>@<timestamp>' suffix is stripped to the canonical uuid. The 'sid' cookie value contains '=' but is read whole. Note: Seznam SID is NEVER taken from GA4 event_data, because GA4's 'sid' query param is the GA4 session id, not the Seznam SID. Requires same-site (first-party) SGTM so cookies reach the server. Safari's ITP deletes cookies created in JavaScript, which includes sid and udid, after 7 days without user interaction with the website (webkit.org/tracking-prevention)."
       }
     ]
   },
@@ -783,7 +783,6 @@ ___SANDBOXED_JS_FOR_SERVER___
 
 const JSON = require('JSON');
 const Math = require('Math');
-const Promise = require('Promise');
 const BigQuery = require('BigQuery');
 const sendHttpRequest = require('sendHttpRequest');
 const getTimestampMillis = require('getTimestampMillis');
@@ -1300,8 +1299,7 @@ function extractFromEventData(data, ev) {
     if (GA4_EVENT_NAME_MAP.hasOwnProperty(ev.event_name)) {
       out.resolvedEventName = GA4_EVENT_NAME_MAP[ev.event_name];
     } else {
-      logToConsole('Seznam SEM [WARN]: GA4 event ' + ev.event_name +
-        ' has no SEM mapping | trace=' + traceId);
+      warn('GA4 event ' + ev.event_name + ' has no SEM mapping');
     }
   }
 
@@ -1349,8 +1347,7 @@ function extractFromEventData(data, ev) {
       }
       if (contents.length > 0) out.eventData.contents = contents;
       if (skipped > 0) {
-        logToConsole('Seznam SEM [WARN]: ' + skipped +
-          ' GA4 items skipped (missing item_id) | trace=' + traceId);
+        warn(skipped + ' GA4 items skipped (missing item_id)');
       }
     }
 
@@ -1446,8 +1443,7 @@ function buildPayload(data, parsed, consent, sznaiidValue) {
 
   // Spec-conformance WARN: docs mark event_url as required.
   if (!eventUrl) {
-    logToConsole('Seznam SEM [WARN]: event_url is empty (no eventUrl, ga4.eventUrl, or referer); ' +
-      'docs mark it required | trace=' + traceId);
+    warn('event_url is empty (no eventUrl, ga4.eventUrl, or referer); docs mark it required');
   }
 
   var eventData = buildEventData(data, parsed, sznaiidValue);
@@ -1483,8 +1479,8 @@ function buildPayload(data, parsed, consent, sznaiidValue) {
     payload.user_ids = { user_data: userData };
   } else {
     // Spec-conformance WARN: docs mark user_ids as required.
-    logToConsole('Seznam SEM [WARN]: payload has no user_ids.user_data ' +
-      '(no sid/udid/hashed-PII present); Seznam may reject or down-rank | trace=' + traceId);
+    warn('payload has no user_ids.user_data (no valid sid/udid/hashed PII is present); ' +
+      'hit is sent without user_ids');
   }
 
   if (data.sendS2sHeaders &&
@@ -1568,9 +1564,8 @@ function normalizeUserDataObject(source) {
     if (!source.hasOwnProperty(entry.alias)) continue;
     var aliasVal = source[entry.alias];
     if (isUnset(aliasVal)) continue;
-    logToConsole('Seznam SEM [WARN]: userDataObject.' + entry.alias +
-      ' is a frontend-template alias - prefer canonical key "' + entry.canonical +
-      '" for clarity | trace=' + traceId);
+    warn('userDataObject.' + entry.alias + ' is a frontend-template alias - prefer canonical key "' +
+      entry.canonical + '" for clarity');
     if (isUnset(out[entry.canonical])) {
       out[entry.canonical] = aliasVal;
     }
@@ -2051,7 +2046,8 @@ function isUnsupplied(path, key, value) {
   return false;
 }
 
-// Object.keys is not available in sandboxed JS, so we iterate manually
+// Iterates with hasOwnProperty, which v2.3 already depends on. The server API offers
+// require('Object').keys; switching to it is deferred to v3 (review N3).
 function hasProperties(obj) {
   if (!obj) return false;
   for (var key in obj) {
