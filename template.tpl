@@ -3544,6 +3544,639 @@ scenarios:
     // Layer 2 set ed.status = false; default check sees ed.status defined → does NOT fire.
     assertThat(capturedBody.event_data.status).isEqualTo(false);
 
+- name: P0 purchase - object-only trio is sent
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'Purchase',
+      eventDataObject: { order_id: 'O-1', currency: 'CZK', value: 100 }
+    }));
+    assertThat(sent().event_data).isEqualTo({ order_id: 'O-1', currency: 'CZK', value: 100, sem_id: SEM_ID });
+    assertSucceeded();
+
+- name: P0 purchase - override-only trio is sent with a numeric value
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'Purchase',
+      eventDataOverrides: [
+        { name: 'order_id', value: 'O-2' },
+        { name: 'currency', value: 'CZK' },
+        { name: 'value', value: '100.50' }
+      ]
+    }));
+    assertThat(sent().event_data).isEqualTo({ order_id: 'O-2', currency: 'CZK', value: 100.5, sem_id: SEM_ID });
+    assertSucceeded();
+
+- name: P0 purchase - missing values in the object do not erase valid GA4 values
+  code: |-
+    mock('getAllEventData', { transaction_id: 'TX-1', currency: 'CZK', value: 250 });
+    runCode(tagData({
+      eventNameSelect: 'Purchase',
+      enableGa4AutoMap: true,
+      eventDataObject: { order_id: null, currency: undefined, value: '' }
+    }));
+    assertThat(sent().event_data).isEqualTo({ order_id: 'TX-1', currency: 'CZK', value: 250, sem_id: SEM_ID });
+    assertSucceeded();
+
+- name: P0 purchase - value 0 is a valid value
+  code: |-
+    runCode(tagData({ eventNameSelect: 'Purchase', orderId: 'O-3', currency: 'CZK', value: 0 }));
+    assertThat(sent().event_data.value).isStrictlyEqualTo(0);
+    assertSucceeded();
+
+- name: P0 purchase - an invalid final value in the object fails without a request
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'Purchase',
+      eventDataObject: { order_id: 'O-4', currency: 'CZK', value: 'abc' }
+    }));
+    assertFailedWithoutRequest();
+    assertThat(logged('Purchase requires: value')).isTrue();
+
+- name: P0 purchase - a locale-formatted value field fails without a request
+  code: |-
+    runCode(tagData({ eventNameSelect: 'Purchase', orderId: 'O-5', currency: 'CZK', value: '1 234,50' }));
+    assertFailedWithoutRequest();
+
+- name: P0 purchase - GA4 items without a value do not synthesize one and the Purchase fails
+  code: |-
+    mock('getAllEventData', {
+      transaction_id: 'TX-2',
+      currency: 'CZK',
+      items: [{ item_id: 'A', price: 121, quantity: 1 }]
+    });
+    runCode(tagData({ eventNameSelect: 'Purchase', enableGa4AutoMap: true }));
+    assertFailedWithoutRequest();
+    assertThat(logged('Purchase requires: value')).isTrue();
+
+- name: P0 value fallback - GA4 items on ViewContent do not synthesize a value
+  code: |-
+    mock('getAllEventData', { items: [{ item_id: 'A', price: 10, quantity: 2 }] });
+    runCode(tagData({ eventNameSelect: 'ViewContent', enableGa4AutoMap: true }));
+    assertThat(sent().event_data.value).isUndefined();
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'A', unit_price: 10, quantity: 2 }]);
+    assertSucceeded();
+
+- name: P0 precedence - object contents win over GA4 items
+  code: |-
+    mock('getAllEventData', { items: [{ item_id: 'GA4', price: 20, quantity: 1 }] });
+    runCode(tagData({
+      eventNameSelect: 'ViewContent',
+      enableGa4AutoMap: true,
+      eventDataObject: { contents: [{ id: 'MANUAL', quantity: 2, unit_price: 10 }] }
+    }));
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'MANUAL', quantity: 2, unit_price: 10 }]);
+
+- name: P0 precedence - an explicit empty contents array is kept over GA4 items
+  code: |-
+    mock('getAllEventData', { items: [{ item_id: 'GA4', price: 20, quantity: 1 }] });
+    runCode(tagData({ eventNameSelect: 'ViewContent', enableGa4AutoMap: true, eventDataObject: { contents: [] } }));
+    assertThat(sent().event_data.contents).isEqualTo([]);
+
+- name: P0 precedence - override tables win over the objects
+  code: |-
+    runCode(tagData({
+      eventDataObject: { currency: 'EUR', value: 100 },
+      eventDataOverrides: [{ name: 'currency', value: 'CZK' }, { name: 'value', value: '50' }],
+      userDataObject: { em: 'HASH_OBJECT' },
+      userDataOverrides: [{ name: 'em', value: 'HASH_OVERRIDE' }]
+    }));
+    assertThat(sent().event_data.currency).isEqualTo('CZK');
+    assertThat(sent().event_data.value).isStrictlyEqualTo(50);
+    assertThat(sent().user_ids.user_data.em).isEqualTo('HASH_OVERRIDE');
+
+- name: P0 identity - malformed explicit sid is dropped and the valid sid cookie fills the gap
+  code: |-
+    mock('getCookieValues', (name) => name === 'sid' ? [VALID_SID] : []);
+    runCode(tagData({ sid: 'not-a-sid' }));
+    assertThat(sent().user_ids.user_data.sid).isEqualTo(VALID_SID);
+    assertThat(logged('ignoring malformed sid from the tag configuration')).isTrue();
+
+- name: P0 identity - malformed explicit udid is dropped and the valid udid cookie fills the gap
+  code: |-
+    mock('getCookieValues', (name) => name === 'udid' ? [VALID_UDID + '@1782277561803'] : []);
+    runCode(tagData({ userDataObject: { udid: 'object-uuid' } }));
+    assertThat(sent().user_ids.user_data.udid).isEqualTo(VALID_UDID);
+    assertThat(logged('ignoring malformed udid from the tag configuration')).isTrue();
+
+- name: P0 identity - valid explicit sid and udid win over valid cookies and share the udid rule
+  code: |-
+    mock('getCookieValues', (name) => {
+      if (name === 'sid') return ['id=1|t=1.000|te=1.000|c=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'];
+      if (name === 'udid') return ['11111111-2222-3333-4444-555555555555@1782277561803'];
+      return [];
+    });
+    runCode(tagData({ sid: VALID_SID, userUdid: VALID_UDID + '@1782277561803' }));
+    assertThat(sent().user_ids.user_data).isEqualTo({ sid: VALID_SID, udid: VALID_UDID });
+
+- name: P0 identity - missing sid is warned even when other identifiers exist
+  code: |-
+    runCode(tagData({ userEmail: 'HASH_EM', userUdid: VALID_UDID }));
+    assertThat(sent().user_ids.user_data).isEqualTo({ em: 'HASH_EM', udid: VALID_UDID });
+    assertThat(logged('no valid sid')).isTrue();
+
+- name: P0 types - numeric order_id, event_id and content ids are sent as strings
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'Purchase',
+      orderId: 123,
+      currency: 'CZK',
+      value: 100,
+      eventId: 456,
+      contents: [{ id: 789, quantity: 1, unit_price: 100 }]
+    }));
+    assertThat(sent().event_data.order_id).isStrictlyEqualTo('123');
+    assertThat(sent().event_id).isStrictlyEqualTo('456');
+    assertThat(sent().event_data.contents[0].id).isStrictlyEqualTo('789');
+
+- name: P0 types - invalid optional numbers are omitted with a WARN
+  code: |-
+    runCode(tagData({
+      valueTax: '1234,50',
+      deliveryPrice: 'abc',
+      otherCosts: 'Infinity',
+      eventDataObject: { predicted_ltv: 1 / 0, goods_intention: 0 / 0, goods_phase: 2.5, value: '19.90' }
+    }));
+    assertThat(sent().event_data).isEqualTo({ value: 19.9, sem_id: SEM_ID });
+    assertThat(logged('event_data.value_tax: expected number')).isTrue();
+    assertThat(logged('event_data.goods_phase: expected integer')).isTrue();
+
+- name: P0 types - status override string false is sent as boolean false
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'CompleteRegistration',
+      eventDataOverrides: [{ name: 'status', value: 'false' }]
+    }));
+    assertThat(sent().event_data.status).isStrictlyEqualTo(false);
+
+- name: P0 types - status 0 from the object is sent as boolean false
+  code: |-
+    runCode(tagData({ eventNameSelect: 'CompleteRegistration', eventDataObject: { status: 0 } }));
+    assertThat(sent().event_data.status).isStrictlyEqualTo(false);
+
+- name: P0 types - an override with boolean false is not ignored
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'CompleteRegistration',
+      eventDataObject: { status: true },
+      eventDataOverrides: [{ name: 'status', value: false }]
+    }));
+    assertThat(sent().event_data.status).isStrictlyEqualTo(false);
+
+- name: P0 types - object product_ids are normalized like the field
+  code: |-
+    runCode(tagData({ eventDataObject: { product_ids: ['12', 'bad', -1, 3.5, 7] } }));
+    assertThat(sent().event_data.product_ids).isEqualTo([12, 7]);
+    assertThat(logged('event_data.product_ids[1]')).isTrue();
+
+- name: P0 unknown keys and placeholder IDs are dropped with a WARN
+  code: |-
+    runCode(tagData({
+      eventDataObject: {
+        unexpected: 'x',
+        order_id: 'undefined',
+        currency: 'CZK',
+        contents: [{ id: 'A', quantity: 1, color: 'red' }]
+      },
+      userDataObject: { em: 'HASH_EM', foo: 'bar', ph: 'null' }
+    }));
+    assertThat(sent().event_data).isEqualTo({
+      currency: 'CZK',
+      contents: [{ id: 'A', quantity: 1 }],
+      content_type: 'product',
+      sem_id: SEM_ID
+    });
+    assertThat(sent().user_ids.user_data).isEqualTo({ em: 'HASH_EM' });
+    assertThat(logged('event_data.unexpected is not a Seznam field')).isTrue();
+    assertThat(logged('user_data.foo is not a Seznam field')).isTrue();
+    assertThat(logged('event_data.contents[0].color is not a Seznam field')).isTrue();
+    assertThat(logged('event_data.order_id: expected')).isTrue();
+    assertThat(logged('user_data.ph: expected')).isTrue();
+
+- name: P0 quantity - GA4 items keep valid quantities and drop invalid ones
+  code: |-
+    mock('getAllEventData', {
+      items: [
+        { item_id: 'MISSING' },
+        { item_id: 'ZERO', quantity: 0 },
+        { item_id: 'NEGATIVE', quantity: -1 },
+        { item_id: 'HALF', quantity: 0.5 },
+        { item_id: 'FRACTION', quantity: 1.9 },
+        { item_id: 'STRING', quantity: '2' },
+        { item_id: 'INFINITE', quantity: 'Infinity' }
+      ]
+    });
+    runCode(tagData({ eventNameSelect: 'AddToCart', enableGa4AutoMap: true }));
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'MISSING', quantity: 1 }, { id: 'STRING', quantity: 2 }]);
+    assertThat(logged('event_data.contents[1].quantity')).isTrue();
+    assertSucceeded();
+
+- name: P0 quantity - object contents drop items with an invalid quantity
+  code: |-
+    runCode(tagData({
+      eventNameSelect: 'AddToCart',
+      eventDataObject: {
+        contents: [{ id: 'A', quantity: 0 }, { id: 'B', quantity: '3' }, { id: 'C', quantity: 1 / 0 }, { id: 'D' }]
+      }
+    }));
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'B', quantity: 3 }, { id: 'D', quantity: 1 }]);
+
+- name: P0 quantity - contents field drops items with an invalid quantity
+  code: |-
+    runCode(tagData({ eventNameSelect: 'AddToCart', contents: '[{"id":"A","quantity":-2},{"id":"B","quantity":1}]' }));
+    assertThat(sent().event_data.contents).isEqualTo([{ id: 'B', quantity: 1 }]);
+
+- name: P0 quantity - dropping every item omits contents and the generated content_type
+  code: |-
+    runCode(tagData({ eventNameSelect: 'AddToCart', contents: [{ id: 'A', quantity: 0 }] }));
+    assertThat(sent().event_data.contents).isUndefined();
+    assertThat(sent().event_data.content_type).isUndefined();
+    assertThat(logged('every item was dropped')).isTrue();
+    assertSucceeded();
+
+- name: P0 quantity - dropping every item keeps an explicit content_type
+  code: |-
+    runCode(tagData({ eventNameSelect: 'AddToCart', contentType: 'product', contents: [{ id: 'A', quantity: 0.5 }] }));
+    assertThat(sent().event_data.contents).isUndefined();
+    assertThat(sent().event_data.content_type).isEqualTo('product');
+
+- name: P0 event_time - fractional milliseconds are rounded to an integer
+  code: |-
+    runCode(tagData({ eventTime: 1700000000000.7 }));
+    assertThat(sent().event_time).isStrictlyEqualTo(1700000000001);
+
+- name: P0 event_time - zero falls back to server time with a WARN
+  code: |-
+    mock('getTimestampMillis', 1790000000000);
+    runCode(tagData({ eventTime: 0 }));
+    assertThat(sent().event_time).isStrictlyEqualTo(1790000000000);
+    assertThat(logged('eventTime')).isTrue();
+
+- name: P0 event_time - a negative value falls back to server time with a WARN
+  code: |-
+    mock('getTimestampMillis', 1790000000000);
+    runCode(tagData({ eventTime: -5 }));
+    assertThat(sent().event_time).isStrictlyEqualTo(1790000000000);
+    assertThat(logged('eventTime')).isTrue();
+
+- name: P0 event_time - a non-numeric value falls back to server time with a WARN
+  code: |-
+    mock('getTimestampMillis', 1790000000000);
+    runCode(tagData({ eventTime: 'abc' }));
+    assertThat(sent().event_time).isStrictlyEqualTo(1790000000000);
+    assertThat(logged('eventTime')).isTrue();
+
+- name: P0 event_time - Infinity falls back to server time with a WARN
+  code: |-
+    mock('getTimestampMillis', 1790000000000);
+    runCode(tagData({ eventTime: 1 / 0 }));
+    assertThat(sent().event_time).isStrictlyEqualTo(1790000000000);
+    assertThat(logged('eventTime')).isTrue();
+
+- name: P0 consent - enumerated values are normalized to granted and denied
+  code: |-
+    runCode(tagData({
+      consentModeObject: {
+        ad_storage: true,
+        ad_user_data: 1,
+        ad_personalization: '1',
+        analytics_storage: 'false',
+        functionality_storage: 0
+      }
+    }));
+    assertThat(sent().consent_mode).isEqualTo({
+      ad_storage: 'granted',
+      ad_user_data: 'granted',
+      ad_personalization: 'granted',
+      functionality_storage: 'denied',
+      analytics_storage: 'denied'
+    });
+
+- name: P0 consent - a JSON string is parsed and normalized
+  code: |-
+    runCode(tagData({ consentModeObject: '{"ad_storage":"true","ad_user_data":"granted","ad_personalization":"0"}' }));
+    assertThat(sent().consent_mode).isEqualTo({ ad_storage: 'granted', ad_user_data: 'granted', ad_personalization: 'denied' });
+
+- name: P0 consent - a partial v1 object is forwarded without filling missing keys
+  code: |-
+    runCode(tagData({ consentModeObject: { ad_storage: 'granted', analytics_storage: 'denied', wait_for_update: 500 } }));
+    assertThat(sent().consent_mode).isEqualTo({ ad_storage: 'granted', analytics_storage: 'denied' });
+    assertSucceeded();
+
+- name: P0 consent - no consent signal at all is sent with a WARN
+  code: |-
+    runCode(tagData({}));
+    assertThat(sent().consent_mode).isUndefined();
+    assertThat(sent().consent_string).isUndefined();
+    assertThat(logged('no consent signal')).isTrue();
+    assertSucceeded();
+
+- name: P0 consent M2 - unparseable consent JSON fails without request or cookie write
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    runCode(tagData({ consentModeObject: '{ad_storage: granted' }));
+    assertFailedWithoutRequest();
+    assertThat(logs).contains('Seznam SEM [ERROR]: consentModeObject: expected object with granted/denied values, got string');
+
+- name: P0 consent M2 - a wrapper object without consent keys fails
+  code: |-
+    runCode(tagData({ consentModeObject: { consent_mode: { ad_storage: 'granted', ad_user_data: 'granted' } } }));
+    assertFailedWithoutRequest();
+    assertThat(logged('consentModeObject: no supported consent key')).isTrue();
+
+- name: P0 consent M2 - Granted with a capital G fails and the value is not logged
+  code: |-
+    runCode(tagData({ consentModeObject: { ad_storage: 'Granted', ad_user_data: 'granted' } }));
+    assertFailedWithoutRequest();
+    assertThat(logs).contains('Seznam SEM [ERROR]: consentModeObject.ad_storage: expected granted/denied (or true/false, 1/0), got string');
+    assertThat(logged('Granted')).isFalse();
+
+- name: P0 consent M2 - yes on a recognized key fails
+  code: |-
+    runCode(tagData({ consentModeObject: { ad_storage: 'granted', ad_user_data: 'yes' } }));
+    assertFailedWithoutRequest();
+    assertThat(logged('consentModeObject.ad_user_data: expected granted/denied')).isTrue();
+
+- name: P0 consent M2 - null on a recognized key fails
+  code: |-
+    runCode(tagData({ consentModeObject: { ad_storage: null } }));
+    assertFailedWithoutRequest();
+    assertThat(logs).contains('Seznam SEM [ERROR]: consentModeObject.ad_storage: expected granted/denied (or true/false, 1/0), got null');
+
+- name: P0 TCF - a valid TCF v2 string is forwarded
+  code: |-
+    runCode(tagData({ consentString: TCF_STRING, consentModeObject: { ad_storage: 'granted' } }));
+    assertThat(sent().consent_string).isEqualTo(TCF_STRING);
+    assertSucceeded();
+
+- name: P0 TCF - the placeholder string undefined counts as absent
+  code: |-
+    runCode(tagData({ consentString: 'undefined', consentModeObject: { ad_storage: 'denied' } }));
+    assertThat(sent().consent_string).isUndefined();
+    assertSucceeded();
+
+- name: P0 TCF - an empty string counts as absent
+  code: |-
+    runCode(tagData({ consentString: '', consentModeObject: { ad_storage: 'denied' } }));
+    assertThat(sent().consent_string).isUndefined();
+    assertSucceeded();
+
+- name: P0 TCF - a CookieConsent-style JSON value fails without request or cookie write
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    runCode(tagData({ consentString: '{stamp:%27abc%27%2Cnecessary:true%2Cmarketing:true}' }));
+    assertFailedWithoutRequest();
+    assertThat(logs).contains('Seznam SEM [ERROR]: consentString: expected IAB TCF v2 string (starts with C; letters, digits, _ . -), got string');
+
+- name: P0 TCF - C followed by invalid characters fails
+  code: |-
+    runCode(tagData({ consentString: 'C!!!!' }));
+    assertFailedWithoutRequest();
+
+- name: P0 headers - granted ad_storage and ad_user_data send s2s_headers
+  code: |-
+    mockClientHeaders();
+    runCode(tagData({ sendS2sHeaders: true, consentModeObject: { ad_storage: 'granted', ad_user_data: 'granted' } }));
+    assertThat(sent().s2s_headers).isEqualTo({ client_ip_address: '1.2.3.4', user_agent: 'test-ua' });
+
+- name: P0 headers - normalized true and 1 open the header gate
+  code: |-
+    mockClientHeaders();
+    runCode(tagData({ sendS2sHeaders: true, consentModeObject: { ad_storage: true, ad_user_data: 1 } }));
+    assertThat(sent().s2s_headers).isEqualTo({ client_ip_address: '1.2.3.4', user_agent: 'test-ua' });
+
+- name: P0 headers - one denied key suppresses s2s_headers
+  code: |-
+    mockClientHeaders();
+    runCode(tagData({ sendS2sHeaders: true, consentModeObject: { ad_storage: 'granted', ad_user_data: 'denied' } }));
+    assertThat(sent().s2s_headers).isUndefined();
+
+- name: P0 headers - missing consent suppresses s2s_headers
+  code: |-
+    mockClientHeaders();
+    runCode(tagData({ sendS2sHeaders: true }));
+    assertThat(sent().s2s_headers).isUndefined();
+
+- name: P0 headers - TCF-only consent suppresses s2s_headers
+  code: |-
+    mockClientHeaders();
+    runCode(tagData({ sendS2sHeaders: true, consentString: TCF_STRING }));
+    assertThat(sent().s2s_headers).isUndefined();
+    assertThat(sent().consent_string).isEqualTo(TCF_STRING);
+
+- name: P0 headers - undefined sendS2sHeaders suppresses s2s_headers
+  code: |-
+    mockClientHeaders();
+    runCode(tagData({ consentModeObject: { ad_storage: 'granted', ad_user_data: 'granted' } }));
+    assertThat(sent().s2s_headers).isUndefined();
+
+- name: P0 sznaiid - cookie uses sameSite lax, httpOnly false and the 90-day default
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    mock('getCookieValues', () => []);
+    runCode(tagData({}));
+    assertApi('setCookie').wasCalledWith('sznaiid', 'CLICK', {
+      domain: 'auto',
+      path: '/',
+      sameSite: 'lax',
+      secure: true,
+      'max-age': 7776000,
+      httpOnly: false
+    });
+    assertThat(sent().event_data.sznaiid).isEqualTo('CLICK');
+
+- name: P0 sznaiid - cookie is not written when the tag fails validation
+  code: |-
+    mock('getAllEventData', { page_location: 'https://shop.example/lp?sznaiid=CLICK' });
+    runCode(tagData({ eventNameSelect: 'Purchase', orderId: 'O-6', currency: 'CZK' }));
+    assertFailedWithoutRequest();
+
+- name: P0 transport - request goes to rtgconv with a 5 s timeout and 2xx succeeds
+  code: |-
+    runCode(tagData({}));
+    assertThat(requests[0].url).isEqualTo('https://sem.seznam.cz/rtgconv');
+    assertThat(requests[0].options.timeout).isEqualTo(5000);
+    assertSucceeded();
+
+- name: P0 transport - 400 fails the tag and logs the status
+  code: |-
+    httpResult = { statusCode: 400, headers: { 'x-request-id': 'REQ-400' }, body: '{"error":"bad"}' };
+    runCode(tagData({}));
+    assertFailedAfterResponse();
+    callLater(() => { assertThat(logged('HTTP 400')).isTrue(); });
+
+- name: P0 transport - 401 fails the tag and logs the S2S SEM ID hint
+  code: |-
+    httpResult = { statusCode: 401, headers: {}, body: '' };
+    runCode(tagData({}));
+    assertFailedAfterResponse();
+    callLater(() => { assertThat(logged('not the sul.js SEM ID')).isTrue(); });
+
+- name: P0 transport - 503 fails the tag and logs the status
+  code: |-
+    httpResult = { statusCode: 503, headers: {}, body: '' };
+    runCode(tagData({}));
+    assertFailedAfterResponse();
+    callLater(() => { assertThat(logged('HTTP 503')).isTrue(); });
+
+- name: P0 transport - a rejected request fails the tag and logs the reason
+  code: |-
+    httpResult = 'reject';
+    runCode(tagData({}));
+    assertFailedAfterResponse();
+    callLater(() => { assertThat(logged('request to Seznam failed: timed_out')).isTrue(); });
+
+- name: P0 transport - optimistic mode succeeds once on 2xx
+  code: |-
+    runCode(tagData({ useOptimisticScenario: true }));
+    assertApi('gtmOnSuccess').wasCalled();
+    callLater(() => { assertApi('gtmOnFailure').wasNotCalled(); });
+
+- name: P0 transport - optimistic mode succeeds once on 403 and logs the hint
+  code: |-
+    httpResult = { statusCode: 403, headers: {}, body: '' };
+    runCode(tagData({ useOptimisticScenario: true }));
+    assertApi('gtmOnSuccess').wasCalled();
+    callLater(() => {
+      assertApi('gtmOnFailure').wasNotCalled();
+      assertThat(logged('not the sul.js SEM ID')).isTrue();
+    });
+
+- name: P0 transport - optimistic mode succeeds once on 5xx and logs the status
+  code: |-
+    httpResult = { statusCode: 500, headers: {}, body: '' };
+    runCode(tagData({ useOptimisticScenario: true }));
+    assertApi('gtmOnSuccess').wasCalled();
+    callLater(() => {
+      assertApi('gtmOnFailure').wasNotCalled();
+      assertThat(logged('HTTP 500')).isTrue();
+    });
+
+- name: P0 transport - optimistic mode succeeds once on rejection and logs the reason
+  code: |-
+    httpResult = 'reject';
+    runCode(tagData({ useOptimisticScenario: true }));
+    assertApi('gtmOnSuccess').wasCalled();
+    callLater(() => {
+      assertApi('gtmOnFailure').wasNotCalled();
+      assertThat(logged('request to Seznam failed: timed_out')).isTrue();
+    });
+
+- name: P0 sem_id - wrong charset fails under Strict without a request
+  code: |-
+    runCode(tagData({ semId: 'ABCDEFGHIJKLMNOPQRSTUVWX', strictEventValidation: true }));
+    assertFailedWithoutRequest();
+    assertThat(logged('semId must be 24 characters')).isTrue();
+
+- name: P0 sem_id - wrong charset WARNs and still sends under loose validation
+  code: |-
+    runCode(tagData({ semId: 'abcdefghijklmnopqrstuvw-' }));
+    assertThat(sent().event_data.sem_id).isEqualTo('abcdefghijklmnopqrstuvw-');
+    assertThat(logged('semId must be 24 characters')).isTrue();
+    assertSucceeded();
+
+- name: P0 sem_id - the object and overrides cannot replace the configured SEM ID
+  code: |-
+    runCode(tagData({
+      eventDataObject: { sem_id: 'zzzzzzzzzzzzzzzzzzzzzzzz' },
+      eventDataOverrides: [{ name: 'sem_id', value: 'yyyyyyyyyyyyyyyyyyyyyyyy' }]
+    }));
+    assertThat(sent().event_data.sem_id).isEqualTo(SEM_ID);
+
+- name: P0 diagnostics - test mode logs the consent summary, raw x-ga-gcs and identity sources
+  code: |-
+    mock('getAllEventData', { 'x-ga-gcs': 'G111' });
+    mock('getCookieValues', (name) => name === 'sid' ? [VALID_SID] : []);
+    runCode(tagData({ testMode: true, consentModeObject: { ad_storage: 'granted' }, consentString: TCF_STRING }));
+    let requestLine = '';
+    for (let n = 0; n < logs.length; n++) {
+      if (logs[n].indexOf('"Type":"Request"') !== -1) requestLine = logs[n];
+    }
+    assertThat(requestLine).contains('"x_ga_gcs":"G111"');
+    assertThat(requestLine).contains('"consent_string":"present"');
+    assertThat(requestLine).contains('"sid":"cookie"');
+    assertThat(requestLine).contains('"udid":"missing"');
+setup: |-
+  // Sandboxed test code has no JSON, Promise or callLater globals; require them like the template does.
+  const JSON = require('JSON');
+  const Promise = require('Promise');
+  const callLater = require('callLater');
+
+  const SEM_ID = 'abcdefghijklmnopqrstuvwx';
+  const VALID_SID = 'id=8889818589302544222|t=1769429094.692|te=1782303169.389|c=DE30F59D28F565B4F191F9E56A38BC79';
+  const VALID_UDID = '019ef805-5dbe-7e8b-acd1-8caed14a91fa';
+  const TCF_STRING = 'CQGzWAAQGzWAAAHABBENBKFsAP_gAEPgAAAAKZtV_G__bXlv-X736ftkeY1f9_h77sQxBhfJs.4FzLvW_JwX32EzNE36tqYKmRIAu3bBIQNtHJjUTVChaogVrzDsak2coTtKJ-BkiHMRe2dY';
+
+  // Every outgoing request and console line of the scenario. Set httpResult to change the response,
+  // or to 'reject' to simulate a transport failure.
+  let requests = [];
+  let logs = [];
+  let httpResult = { statusCode: 200, headers: { 'x-request-id': 'REQ-1' }, body: '' };
+
+  mock('sendHttpRequest', (url, options, body) => {
+    requests.push({ url: url, options: options, body: JSON.parse(body) });
+    return Promise.create((resolve, reject) => {
+      if (httpResult === 'reject') reject({ reason: 'timed_out' });
+      else resolve(httpResult);
+    });
+  });
+  mock('logToConsole', (message) => { logs.push(message); });
+  mock('setCookie', () => {});
+
+  // Tag fields for a valid PageView that waits for the API response; `extra` adds or replaces fields.
+  function tagData(extra) {
+    const fields = {
+      eventNameSelect: 'PageView',
+      semId: SEM_ID,
+      eventUrl: 'https://shop.example/',
+      useOptimisticScenario: false
+    };
+    for (const key in extra) fields[key] = extra[key];
+    return fields;
+  }
+
+  // Parsed body of the last request; asserts that a request was made.
+  function sent() {
+    assertApi('sendHttpRequest').wasCalled();
+    return requests[requests.length - 1].body;
+  }
+
+  function logged(fragment) {
+    for (let n = 0; n < logs.length; n++) {
+      if (logs[n].indexOf(fragment) !== -1) return true;
+    }
+    return false;
+  }
+
+  function mockClientHeaders() {
+    mock('getRequestHeader', (name) => {
+      if (name === 'x-forwarded-for') return '1.2.3.4, 10.0.0.1';
+      if (name === 'user-agent') return 'test-ua';
+      return undefined;
+    });
+  }
+
+  function assertSucceeded() {
+    callLater(() => {
+      assertApi('gtmOnSuccess').wasCalled();
+      assertApi('gtmOnFailure').wasNotCalled();
+    });
+  }
+
+  function assertFailedAfterResponse() {
+    callLater(() => {
+      assertApi('gtmOnFailure').wasCalled();
+      assertApi('gtmOnSuccess').wasNotCalled();
+    });
+  }
+
+  // Configuration and validation failures stop the tag synchronously: no request, no cookie write.
+  function assertFailedWithoutRequest() {
+    assertApi('gtmOnFailure').wasCalled();
+    assertApi('gtmOnSuccess').wasNotCalled();
+    assertApi('sendHttpRequest').wasNotCalled();
+    assertApi('setCookie').wasNotCalled();
+  }
+
 
 ___NOTES___
 
