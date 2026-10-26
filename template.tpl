@@ -1469,9 +1469,9 @@ function normalizeUserDataObject(source) {
  * sznaiid cookie + URL extraction
  ******************************************************************************/
 
-// Try one URL; return sznaiid value or '' if not found / preview ping / unparseable.
+// Try one URL; return sznaiid value or '' if not a string / not found / preview ping / unparseable.
 function extractFromSingleUrl(url) {
-  if (!url) return '';
+  if (getType(url) !== 'string' || !url) return '';
   // FB CAPI ref pattern for preview-ping guard (sandbox-safe; matches at offset 0).
   if (url.lastIndexOf('https://gtm-msr.appspot.com/', 0) === 0) return '';
   var parsedUrl = parseUrl(url);
@@ -1489,8 +1489,9 @@ function extractFromSingleUrl(url) {
 // event as preview-context and short-circuit — do not fall back to referer.
 // Otherwise a preview hit on a real page with ?sznaiid=... in referer would
 // write a real attribution cookie during a debug session.
+// A page_location that is not a string (a non-GA4 client can write any type) is skipped.
 function extractSznaiidFromUrl(ev) {
-  var pageLoc = (getType(ev) === 'object' && ev.page_location) ? ev.page_location : '';
+  var pageLoc = (getType(ev) === 'object' && getType(ev.page_location) === 'string') ? ev.page_location : '';
   if (pageLoc && pageLoc.lastIndexOf('https://gtm-msr.appspot.com/', 0) === 0) return '';
   return extractFromSingleUrl(pageLoc) ||
          extractFromSingleUrl(getRequestHeader('referer')) ||
