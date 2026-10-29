@@ -4749,6 +4749,9 @@ setup: |-
   });
   mock('logToConsole', (message) => { logs.push(message); });
   mock('setCookie', () => {});
+  // In the GTM editor the test request carries Referer: https://tagmanager.googleusercontent.com/,
+  // which the event_url fallback would read. No header by default; scenarios mock the ones they need.
+  mock('getRequestHeader', () => undefined);
 
   // Tag fields for a valid PageView that waits for the API response; `extra` adds or replaces fields.
   function tagData(extra) {
