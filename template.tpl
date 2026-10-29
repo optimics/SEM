@@ -954,6 +954,9 @@ const TIMEOUT_MS = 5000;
 // sznaiid cookie lifetime: 30 days, the approximation of the one calendar month sem.js uses.
 const SZNAIID_MAX_AGE = 2592000;
 
+// parseJson rejects deeper JSON: Seznam's schema has at most 3 levels; the sandbox stack overflows at ~1,000.
+const MAX_JSON_DEPTH = 64;
+
 /*******************************************************************************
  * Main flow
  ******************************************************************************/
@@ -2173,18 +2176,19 @@ function hasProperties(obj) {
 
 // JSON.parse throws on invalid input in the sGTM runtime (the API reference says it returns
 // undefined), and sandboxed JS has no try/catch. parseJson checks a string against the RFC 8259
-// grammar first and returns the parsed value, or undefined when the string is not valid JSON.
-// Each scan function returns the index after its match at i, or -1.
+// grammar first and returns the parsed value, or undefined when the string is not valid JSON or
+// nests deeper than MAX_JSON_DEPTH. Each scan function returns the index after its match at i, or -1.
 function parseJson(s) {
-  return getType(s) === 'string' && scanJsonValue(s, 0) === s.length ? JSON.parse(s) : undefined;
+  return getType(s) === 'string' && scanJsonValue(s, 0, 0) === s.length ? JSON.parse(s) : undefined;
 }
 
-// A value and the whitespace around it. Numbers: -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
-function scanJsonValue(s, i) {
+// A value and the whitespace around it, inside `depth` containers.
+// Numbers: -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
+function scanJsonValue(s, i, depth) {
   i = skipChars(s, i, ' \t\n\r');
   var c = s.charAt(i);
   if (c === '"') i = scanJsonString(s, i);
-  else if (c === '{' || c === '[') i = scanJsonContainer(s, i, c === '{' ? '}' : ']');
+  else if (c === '{' || c === '[') i = scanJsonContainer(s, i, c === '{' ? '}' : ']', depth + 1);
   else if (s.substring(i, i + 4) === 'true' || s.substring(i, i + 4) === 'null') i += 4;
   else if (s.substring(i, i + 5) === 'false') i += 5;
   else {
@@ -2196,8 +2200,10 @@ function scanJsonValue(s, i) {
   return skipChars(s, i, ' \t\n\r');
 }
 
-// An object or array from its opening bracket at i. Object members are a string, ':' and a value.
-function scanJsonContainer(s, i, close) {
+// An object or array from its opening bracket at i, at nesting level `depth` (the outermost is 1).
+// Object members are a string, ':' and a value.
+function scanJsonContainer(s, i, close, depth) {
+  if (depth > MAX_JSON_DEPTH) return -1;
   i = skipChars(s, i + 1, ' \t\n\r');
   if (s.charAt(i) === close) return i + 1;
   while (i !== -1) {
@@ -2206,7 +2212,7 @@ function scanJsonContainer(s, i, close) {
       if (s.charAt(i) !== ':') return -1;
       i++;
     }
-    i = scanJsonValue(s, i);
+    i = scanJsonValue(s, i, depth);
     if (s.charAt(i) === close) return i + 1;
     i = s.charAt(i) === ',' ? skipChars(s, i + 1, ' \t\n\r') : -1;
   }
