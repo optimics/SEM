@@ -6043,6 +6043,9 @@ setup: |-
   });
   mock('logToConsole', (message) => { logs.push(message); });
   mock('setCookie', () => {});
+  // In the GTM editor the test request carries Referer: https://tagmanager.googleusercontent.com/,
+  // which the event_url fallback would read. No header by default; scenarios mock the ones they need.
+  mock('getRequestHeader', () => undefined);
 
   // Scenarios run as in GTM Preview, where logType 'debug' logs WARN lines. Set containerVersion to a
   // production container (or undefined) to test the logging levels.
