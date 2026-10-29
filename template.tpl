@@ -2870,6 +2870,65 @@ scenarios:
     assertThat(eventData.status).isTrue();
     callLater(() => { assertApi('gtmOnFailure').wasNotCalled(); });
 
+- name: v3 FU3 - an Event Data Object nested 64 levels deep is parsed
+  code: |-
+    runCode(tagData({ eventDataObject: '{"predicted_ltv":7,"ignored":' + nestedArrays(63) + '}' }));
+    assertThat(sent().event_data.predicted_ltv).isEqualTo(7);
+    assertThat(logged('invalid JSON')).isFalse();
+    assertSucceeded();
+
+- name: v3 FU3 - an Event Data Object nested 65 levels deep is invalid JSON, omitted with an ERROR, and the hit is sent
+  code: |-
+    runCode(tagData({ eventDataObject: '{"predicted_ltv":7,"ignored":' + nestedArrays(64) + '}' }));
+    assertThat(sent().event_data.predicted_ltv).isUndefined();
+    assertThat(logged('Seznam SEM [ERROR]: eventDataObject: invalid JSON, got string; omitting it')).isTrue();
+    assertSucceeded();
+
+- name: v3 FU3 - an Event Data Object nested 2000 levels deep is invalid JSON and does not crash the tag
+  code: |-
+    runCode(tagData({ eventDataObject: '{"predicted_ltv":7,"ignored":' + nestedArrays(1999) + '}' }));
+    assertThat(sent().event_data.predicted_ltv).isUndefined();
+    assertThat(logged('Seznam SEM [ERROR]: eventDataObject: invalid JSON, got string; omitting it')).isTrue();
+    assertSucceeded();
+
+- name: v3 FU3 - a Contents string nested 65 or 2000 levels deep is omitted with a WARN and GA4 contents are not restored
+  code: |-
+    mock('getAllEventData', { items: [{ item_id: 'GA4', quantity: 1 }] });
+    runCode(tagData({ eventNameSelect: 'AddToCart', enableGa4AutoMap: true, contents: nestedArrays(65) }));
+    runCode(tagData({ eventNameSelect: 'AddToCart', enableGa4AutoMap: true, contents: nestedArrays(2000) }));
+    assertThat(requests.length, 'number of requests').isEqualTo(2);
+    let warnings = 0;
+    for (let n = 0; n < logs.length; n++) {
+      if (logs[n].indexOf('event_data.contents: invalid JSON, got string; omitting') !== -1) warnings++;
+    }
+    assertThat(warnings, 'invalid JSON warnings').isEqualTo(2);
+    for (let n = 0; n < requests.length; n++) assertThat(requests[n].body.event_data.contents).isUndefined();
+    callLater(() => { assertApi('gtmOnFailure').wasNotCalled(); });
+
+- name: v3 FU3 - a Consent Mode string nested 2000 levels deep fails the tag with an ERROR
+  code: |-
+    runCode(tagData({ consentModeObject: '{"ad_storage":"granted","x":' + nestedArrays(1999) + '}' }));
+    assertFailedWithoutRequest();
+    assertThat(logs).contains('Seznam SEM [ERROR]: consentModeObject: expected object with granted/denied values, got string');
+
+- name: v3 O1 parseUrl - a relative GA4 page_location sends the hit without sznaiid or a cookie write
+  code: |-
+    mock('getAllEventData', { event_name: 'page_view', page_location: '/virtual/thankyou' });
+    runCode(tagData({ enableGa4AutoMap: true }));
+    assertThat(sent().event_url).isEqualTo('https://shop.example/');
+    assertThat(requests[0].raw).doesNotContain('sznaiid');
+    assertApi('setCookie').wasNotCalled();
+    assertSucceeded();
+
+- name: v3 O1 parseUrl - a GA4 page_location that is not a URL sends the hit without sznaiid or a cookie write
+  code: |-
+    mock('getAllEventData', { event_name: 'page_view', page_location: 'not a url' });
+    runCode(tagData({ enableGa4AutoMap: true }));
+    assertThat(sent().event_url).isEqualTo('https://shop.example/');
+    assertThat(requests[0].raw).doesNotContain('sznaiid');
+    assertApi('setCookie').wasNotCalled();
+    assertSucceeded();
+
 - name: Invalid JSON in userDataObject warns under loose (does not crash)
   code: |-
     let capturedBody;
@@ -6336,6 +6395,13 @@ setup: |-
   // R3: page_location values a non-GA4 client could write; the object and the array carry a click ID
   // that must not be used.
   const NON_STRING_URLS = [{ url: 'https://shop.example/?sznaiid=OBJECT' }, 123, true, ['https://shop.example/?sznaiid=ARRAY']];
+
+  // FU3: `levels` nested JSON arrays around 1; nestedArrays(2) is '[[1]]'.
+  function nestedArrays(levels) {
+    let json = '1';
+    for (let n = 0; n < levels; n++) json = '[' + json + ']';
+    return json;
+  }
 
   // Configuration and validation failures stop the tag synchronously: no request, no cookie write.
   function assertFailedWithoutRequest() {
