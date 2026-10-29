@@ -158,6 +158,7 @@ Every item below changes what an existing tag sends or whether it fails. After u
 - Two test scenarios used ES6 object shorthand, which the GTM test parser rejects.
 - ERROR lines, which are logged whatever Test Mode holds, could carry payload values, PII and consent values: a BigQuery insert failure logged the rejected row with its `request_body`, the HTTP ERROR an excerpt of the response body, and a transport rejection its serialized object. The BigQuery line now logs only a reason code from BigQuery's documented error table (any other reason as `unknown`) and the row count; the HTTP line has no `body=` (the body stays in the Test Mode Response line); a transport rejection logs `failed`, `timed_out` or `unknown`.
 - A `page_location` that is not a string (an object, number, boolean or array written by a client other than GA4) threw in the sznaiid lookup before any callback. It is now skipped like a missing value: GA4 Auto-Map does not take it as `event_url`, and the Referer fallback applies.
+- Malformed JSON crashed the tag. In the sGTM runtime `JSON.parse` throws on invalid input (Google's API reference says it returns `undefined`), so a malformed User or Event Data Object, Contents, Product IDs or Consent Mode string, including the placeholder string `undefined`, stopped the tag with no hit and no log line. Every such string is now checked against the JSON grammar before it is parsed, and the documented handling applies: an ERROR line with Strict off, a failed tag with Strict on or for malformed consent.
 
 ### Added
 
@@ -168,14 +169,14 @@ Every item below changes what an existing tag sends or whether it fails. After u
 
 2.3.1 is a compatibility-preserving patch candidate. These gates must pass before the release commit:
 
-1. One green run of the embedded test suite in a connected GTM editor, recorded with the file hash. **Open.** No green editor test run is recorded: in Matěj's container the editor's test runner never produced results. Attempts produced a generic "Invalid input" and/or "Unable to connect to the tag server", with timing-dependent results; the cause remains unisolated (`review/gtm-verification/p0-editor-run.md`). The Node runner reports 166/166. This gate stays open until the agreed editor run passes or Matěj explicitly changes the gate.
+1. One green run of the embedded test suite in a connected GTM editor, recorded with the file hash. **Open.** No green editor test run is recorded: in Matěj's container the editor's test runner never produced results. Attempts produced a generic "Invalid input" and/or "Unable to connect to the tag server" (`review/gtm-verification/p0-editor-run.md`). On 2026-10-29 the editor ran the 3.0.0 tests after the playground's Cloudflare Worker route was fixed; "Invalid input" appeared while the S2S SEM ID in Template Preview was empty and when all tests ran in one request (`review/gtm-verification/v3-gates.md`, "Gate 1 result"). Run the 2.3.1 tests the same way: an SEM ID typed into Template Preview, one test at a time. The Node runner reports 178/178. This gate stays open until the agreed editor run passes or Matěj explicitly changes the gate.
 2. Preview of the upgraded playground tags (17 and 20): payloads, consent behavior and `Set-Cookie`. **Partly done:** HEAD 551bb2d was verified at runtime in real sGTM: the existing tag 17 fired on the upgraded template, rtgconv answered `200`, `api.template_version` was `2.3.1`, and `sid`/`udid` came from the cookie fallback; no permission dialog appeared on import. Tag 20 (Purchase with the consent object) and the `Set-Cookie` check are still open.
 3. The README consent transport verified end to end (browser → GA4 client event data → mapped variable → outgoing `consent_mode`).
 4. The "(unreleased)" label replaced by the release date only in the release commit; `metadata.yaml` re-pinned after the push.
 
 ### Notes
 
-- Tests: 70 → 177 scenarios, with a shared `setup:` block. They cover the P0 rows of the review regression matrix and the P0 review fixes. Valid hits assert exactly one request; failures assert none.
+- Tests: 70 → 178 scenarios, with a shared `setup:` block. They cover the P0 rows of the review regression matrix and the P0 review fixes. Valid hits assert exactly one request; failures assert none.
 - The WARN for a payload without `user_ids` now states only what is observable: "no valid sid/udid/hashed PII is present; hit is sent without user_ids".
 - Items in `contents` need no particular key (the schema requires none). Whether items without `id`, `content_name` and `content_category` should be dropped is an open product decision; 2.3.1 keeps them.
 - Deliberately unchanged in 2.3.1 (planned for v3): the optimistic default, Strict Event Validation, first-touch sznaiid, the GA4 event-name map, `transaction_id` as an `event_id` fallback, the frontend-template aliases, BigQuery logging, and the pass-through of identifiers and `review_email` regardless of consent.
