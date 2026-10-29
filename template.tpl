@@ -215,7 +215,7 @@ ___TEMPLATE_PARAMETERS___
         ],
         "simpleValueType": true,
         "defaultValue": "object",
-        "help": "Choose how to provide user data. 'Object variable': one GTM variable resolving to an object with SEM-native keys. 'Individual fields': map each field separately. Both produce the same payload; the cookie sid/udid fallback below applies to either mode."
+        "help": "Choose how to provide user data. 'Object variable': one GTM variable resolving to an object with SEM-native keys. 'Individual fields': map each field separately. Only the fields of the selected mode are sent: values left in the other mode's fields stay stored but are hidden, and GTM does not pass them to the tag. A tag created before 2.3.0 stores no mode, so its individual fields are not sent until 'Individual fields' is selected and the tag is saved. The cookie sid/udid fallback below applies to either mode."
       },
       {
         "type": "TEXT",
@@ -393,7 +393,7 @@ ___TEMPLATE_PARAMETERS___
         ],
         "simpleValueType": true,
         "defaultValue": "object",
-        "help": "Choose how to provide event data. 'Object variable': one GTM variable resolving to an object with event_data keys (currency, value, order_id, contents, etc.). 'Individual fields': map each field separately. Both produce the same payload."
+        "help": "Choose how to provide event data. 'Object variable': one GTM variable resolving to an object with event_data keys (currency, value, order_id, contents, etc.). 'Individual fields': map each field separately. Only the fields of the selected mode are sent: values left in the other mode's fields stay stored but are hidden, and GTM does not pass them to the tag. A tag created before 2.3.0 stores no mode, so its individual fields are not sent until 'Individual fields' is selected and the tag is saved."
       },
       {
         "type": "TEXT",
@@ -1114,7 +1114,14 @@ function validate(payload) {
     if (ed.currency === undefined) missing.push('currency');
     if (ed.value === undefined) missing.push('value');
     if (missing.length > 0) {
-      return 'Purchase requires: ' + missing.join(', ');
+      var purchaseMsg = 'Purchase requires: ' + missing.join(', ');
+      // GTM does not deliver the fields hidden by the input mode, and a tag created before 2.3.0
+      // stores no mode, so its individual Event Data fields never reach `data`.
+      if (data.eventDataInputMode !== 'fields') {
+        purchaseMsg += '; individual Event Data fields are ignored unless Event Data input mode is ' +
+          '"Individual fields" (README Troubleshooting)';
+      }
+      return purchaseMsg;
     }
     if (ed.contents === undefined) {
       warn('Purchase without contents is accepted by the API but strongly recommended for retargeting/attribution');
@@ -5063,8 +5070,8 @@ setup: |-
   }
 
   // G5: the scenario's ERROR lines, and the clause a failed Purchase gets when Event Data input mode
-  // is not 'Individual fields'.
-  const INPUT_MODE_HINT = "; individual Event Data fields are ignored unless Event Data input mode is 'Individual fields' (README Troubleshooting)";
+  // is not "Individual fields".
+  const INPUT_MODE_HINT = '; individual Event Data fields are ignored unless Event Data input mode is "Individual fields" (README Troubleshooting)';
   function errorLines() {
     const errors = [];
     for (let n = 0; n < logs.length; n++) {
