@@ -1,6 +1,16 @@
 homepage: https://www.optimics.cz
 documentation: https://github.com/optimics/SEM/blob/main/README.md
 versions:
+  - sha: f149c59477e28d9249be9ead521d875246820b3e
+    changeNotes: >-
+      v3.0.0 — a smaller UI on top of the 2.3.1 behavior: event and user data
+      go into an object or a Key – Value table with keys picked from a list;
+      Console logging levels no/debug/always; validation is always strict;
+      sznaiid is last touch with a 30-day lifetime; client IP and User-Agent
+      come from the GA4 event data first. The v2.x controls keep working in the
+      collapsed group "Starší pole (v2.x)" and are reported in one WARN; fields
+      hidden by the 2.x input mode apply again. Read the upgrade notes in
+      CHANGELOG.md and the README section "Přechod na verzi 3" before updating.
   - sha: 6161f451b65b60b009c123af11e1209f87e9ac6f
     changeNotes: >-
       v2.3.1 — correctness patch. The payload is assembled, normalized and
