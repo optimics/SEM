@@ -2736,6 +2736,36 @@ scenarios:
     assertThat(capturedBody.event_name).isEqualTo('PageView');
     callLater(() => { assertApi('gtmOnSuccess').wasCalled(); });
 
+- name: Gate 1 R11 - a JSON string is checked before it is parsed, invalid JSON is an ERROR and never throws
+  code: |-
+    // JSON.parse throws on invalid input in the sGTM runtime. With Strict off every string runs as a
+    // User Data Object: invalid JSON is logged as an ERROR, valid JSON that is not an object with another
+    // ERROR, and blank strings are missing. The hit is sent every time.
+    const INVALID = ['{not json', '[broken', '{"a":1', '{"a":1,}', "{'a':1}", '01', '1.', '"\\x"', 'NaN',
+      '"a\nb"', '"a\tb"', '"\u001f"', '"\\u12G4"', '[1,]', '-'];
+    const NOT_OBJECTS = ['-0.5e+3', 'true', 'false', 'null', ' [1, {"a": [true, null]}, "\\u00e9"] '];
+    const BLANK = ['', ' '];
+    const all = INVALID.concat(NOT_OBJECTS, BLANK);
+    for (let n = 0; n < all.length; n++) runCode(tagData({ userDataObject: all[n], strictEventValidation: false }));
+    // A valid object with whitespace around it, every string escape and nesting is used.
+    runCode(tagData({ strictEventValidation: false, eventDataObject: ' \r\n\t{"search_string": "caf\\u00e9 \\"q\\" \\\\ \\/ \\b\\f\\n\\r\\t é",' +
+      ' "predicted_ltv": -0.5e+3, "contents": [{"id": "P1", "quantity": 2}], "status": true} \n' }));
+    let invalid = 0;
+    let notObject = 0;
+    for (let n = 0; n < logs.length; n++) {
+      if (logs[n].indexOf('[ERROR]: userDataObject: invalid JSON, got string') !== -1) invalid++;
+      if (logs[n].indexOf('[ERROR]: userDataObject: expected a JSON object, got string') !== -1) notObject++;
+    }
+    assertThat(invalid, 'invalid JSON errors').isEqualTo(INVALID.length);
+    assertThat(notObject, 'valid JSON that is not an object').isEqualTo(NOT_OBJECTS.length);
+    assertThat(requests.length, 'number of requests').isEqualTo(all.length + 1);
+    const eventData = requests[all.length].body.event_data;
+    assertThat(eventData.search_string).isEqualTo('café "q" \\ / \b\f\n\r\t é');
+    assertThat(eventData.predicted_ltv).isEqualTo(-500);
+    assertThat(eventData.contents).isEqualTo([{ id: 'P1', quantity: 2 }]);
+    assertThat(eventData.status).isTrue();
+    callLater(() => { assertApi('gtmOnFailure').wasNotCalled(); });
+
 - name: status false is included in payload
   code: |-
     let capturedBody;
