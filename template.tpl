@@ -1172,7 +1172,7 @@ function resolveConsent(rawMode, rawString) {
   var result = { mode: {}, string: undefined, error: undefined };
 
   if (!isUnset(rawMode)) {
-    var obj = getType(rawMode) === 'string' ? JSON.parse(rawMode) : rawMode;
+    var obj = getType(rawMode) === 'string' ? parseJson(rawMode) : rawMode;
     if (getType(obj) !== 'object') {
       result.error = 'consentModeObject: expected object with granted/denied values, got ' + getType(rawMode);
       return result;
@@ -1402,13 +1402,13 @@ function parseInputFields(data) {
 }
 
 // An object, a JSON object string, or missing (isMissing). Other values, including false and 0,
-// are input errors. Sandboxed JS has no try/catch; JSON.parse returns undefined on invalid input.
+// are input errors. parseJson returns undefined for invalid JSON.
 function parseObjectField(fieldName, rawValue) {
   if (isMissing(rawValue)) return undefined;
   if (getType(rawValue) === 'object') return rawValue;
   var problem = 'expected object or JSON string, got ' + getType(rawValue);
   if (getType(rawValue) === 'string') {
-    var value = JSON.parse(rawValue);
+    var value = parseJson(rawValue);
     if (getType(value) === 'object') return value;
     problem = value === undefined ? 'invalid JSON, got string' : 'expected a JSON object, got string';
   }
@@ -1822,7 +1822,7 @@ function normalizeValue(type, value, path) {
     // value that does not parse is omitted and never brings back a lower layer's array.
     var list = value;
     if (getType(value) === 'string') {
-      list = JSON.parse(value);
+      list = parseJson(value);
       if (list === undefined) {
         warn(path + ': invalid JSON, got string; omitting');
         return undefined;
@@ -2169,6 +2169,80 @@ function addIfPresent(obj, key, value) {
 // Own keys via require('Object'), so an input key named like an Object method stays an ordinary key.
 function hasProperties(obj) {
   return getType(obj) === 'object' && objectApi.keys(obj).length > 0;
+}
+
+// JSON.parse throws on invalid input in the sGTM runtime (the API reference says it returns
+// undefined), and sandboxed JS has no try/catch. parseJson checks a string against the RFC 8259
+// grammar first and returns the parsed value, or undefined when the string is not valid JSON.
+// Each scan function returns the index after its match at i, or -1.
+function parseJson(s) {
+  return getType(s) === 'string' && scanJsonValue(s, 0) === s.length ? JSON.parse(s) : undefined;
+}
+
+// A value and the whitespace around it. Numbers: -?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?
+function scanJsonValue(s, i) {
+  i = skipChars(s, i, ' \t\n\r');
+  var c = s.charAt(i);
+  if (c === '"') i = scanJsonString(s, i);
+  else if (c === '{' || c === '[') i = scanJsonContainer(s, i, c === '{' ? '}' : ']');
+  else if (s.substring(i, i + 4) === 'true' || s.substring(i, i + 4) === 'null') i += 4;
+  else if (s.substring(i, i + 5) === 'false') i += 5;
+  else {
+    if (c === '-') i++;
+    i = s.charAt(i) === '0' ? i + 1 : scanJsonDigits(s, i);
+    if (s.charAt(i) === '.') i = scanJsonDigits(s, i + 1);
+    if (isOneOf(s.charAt(i), 'eE')) i = scanJsonDigits(s, isOneOf(s.charAt(i + 1), '+-') ? i + 2 : i + 1);
+  }
+  return skipChars(s, i, ' \t\n\r');
+}
+
+// An object or array from its opening bracket at i. Object members are a string, ':' and a value.
+function scanJsonContainer(s, i, close) {
+  i = skipChars(s, i + 1, ' \t\n\r');
+  if (s.charAt(i) === close) return i + 1;
+  while (i !== -1) {
+    if (close === '}') {
+      i = skipChars(s, scanJsonString(s, i), ' \t\n\r');
+      if (s.charAt(i) !== ':') return -1;
+      i++;
+    }
+    i = scanJsonValue(s, i);
+    if (s.charAt(i) === close) return i + 1;
+    i = s.charAt(i) === ',' ? skipChars(s, i + 1, ' \t\n\r') : -1;
+  }
+  return -1;
+}
+
+// A string from its opening quote at i. Characters below U+0020 must be escaped; the escapes are
+// \" \\ \/ \b \f \n \r \t and \u with four hex digits.
+function scanJsonString(s, i) {
+  if (s.charAt(i) !== '"') return -1;
+  for (var j = i + 1; j < s.length; j++) {
+    var c = s.charAt(j);
+    if (c === '"') return j + 1;
+    if (c < ' ') return -1;
+    if (c === '\\') {
+      j++;
+      if (s.charAt(j) === 'u' && skipChars(s, j + 1, '0123456789abcdefABCDEF') >= j + 5) j += 4;
+      else if (!isOneOf(s.charAt(j), '"\\/bfnrt')) return -1;
+    }
+  }
+  return -1;
+}
+
+function scanJsonDigits(s, i) {
+  var end = skipChars(s, i, '0123456789');
+  return end > i ? end : -1;
+}
+
+// charAt returns '' outside the string, and indexOf finds '' in every string.
+function isOneOf(c, chars) {
+  return c !== '' && chars.indexOf(c) !== -1;
+}
+
+function skipChars(s, i, chars) {
+  while (isOneOf(s.charAt(i), chars)) i++;
+  return i;
 }
 
 
