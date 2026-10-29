@@ -98,19 +98,20 @@ Every item below changes what an existing tag sends or whether it fails. After u
 
 - 401/403 responses log a hint to use the S2S SEM ID from Sklik, not the sul.js SEM ID. HTTP error lines include the `x-request-id`.
 - The Test Mode request line includes a consent summary, the raw GA4 `x-ga-gcs` value (logged only, never decoded into the payload) and the identity source.
+- A Purchase that fails the `order_id` / `currency` / `value` check while *Event Data input mode* is not *Individual fields* ends its ERROR line with `; individual Event Data fields are ignored unless Event Data input mode is "Individual fields" (README Troubleshooting)`, and the help texts of both input modes state that the fields of the mode not selected are hidden and not sent (they said both modes produce the same payload). See 2.3.0 Known issues.
 
 ### Release gates
 
 2.3.1 is a compatibility-preserving patch candidate. These gates must pass before the release commit:
 
-1. One green run of the embedded test suite in a connected GTM editor, recorded with the file hash. **Open.** No green editor test run is recorded: in Matěj's container the editor's test runner never produced results. Attempts produced a generic "Invalid input" and/or "Unable to connect to the tag server" (`review/gtm-verification/p0-editor-run.md`). On 2026-10-29 the editor ran the 3.0.0 tests after the playground's Cloudflare Worker route was fixed; "Invalid input" appeared while the S2S SEM ID in Template Preview was empty and when all tests ran in one request (`review/gtm-verification/v3-gates.md`, "Gate 1 result"). Run the 2.3.1 tests the same way: an SEM ID typed into Template Preview, one test at a time. The Node runner reports 185/185. This gate stays open until the agreed editor run passes or Matěj explicitly changes the gate.
+1. One green run of the embedded test suite in a connected GTM editor, recorded with the file hash. **Open.** No green editor test run is recorded: in Matěj's container the editor's test runner never produced results. Attempts produced a generic "Invalid input" and/or "Unable to connect to the tag server" (`review/gtm-verification/p0-editor-run.md`). On 2026-10-29 the editor ran the 3.0.0 tests after the playground's Cloudflare Worker route was fixed; "Invalid input" appeared while the S2S SEM ID in Template Preview was empty and when all tests ran in one request (`review/gtm-verification/v3-gates.md`, "Gate 1 result"). Run the 2.3.1 tests the same way: an SEM ID typed into Template Preview, one test at a time. The Node runner reports 188/188. This gate stays open until the agreed editor run passes or Matěj explicitly changes the gate.
 2. Preview of the upgraded playground tags (17 and 20): payloads, consent behavior and `Set-Cookie`. **Partly done:** HEAD 551bb2d was verified at runtime in real sGTM: the existing tag 17 fired on the upgraded template, rtgconv answered `200`, `api.template_version` was `2.3.1`, and `sid`/`udid` came from the cookie fallback; no permission dialog appeared on import. Tag 20 (Purchase with the consent object) and the `Set-Cookie` check are still open.
 3. The README consent transport verified end to end (browser → GA4 client event data → mapped variable → outgoing `consent_mode`).
 4. The "(unreleased)" label replaced by the release date only in the release commit; `metadata.yaml` re-pinned after the push.
 
 ### Notes
 
-- Tests: 70 → 185 scenarios, with a shared `setup:` block. They cover the P0 rows of the review regression matrix and the P0 review fixes. Valid hits assert exactly one request; failures assert none.
+- Tests: 70 → 188 scenarios, with a shared `setup:` block. They cover the P0 rows of the review regression matrix and the P0 review fixes. Valid hits assert exactly one request; failures assert none.
 - The WARN for a payload without `user_ids` now states only what is observable: "no valid sid/udid/hashed PII is present; hit is sent without user_ids".
 - Items in `contents` need no particular key (the schema requires none). Whether items without `id`, `content_name` and `content_category` should be dropped is an open product decision; 2.3.1 keeps them.
 - Deliberately unchanged in 2.3.1 (planned for v3): the optimistic default, Strict Event Validation, first-touch sznaiid, the GA4 event-name map, `transaction_id` as an `event_id` fallback, the frontend-template aliases, BigQuery logging, and the pass-through of identifiers and `review_email` regardless of consent.
@@ -141,3 +142,12 @@ Commit `dce9231`.
 - `X-Client-Version` and `api.template_version` still reported `2.2.1`.
 - A Purchase with its fields only in the Event Data Object (the default input mode) or in the overrides failed validation.
 - See the 2.3.1 "Fixed" list for the payload normalization issues.
+
+Not fixed in 2.3.1:
+
+- **The individual fields of a tag created before 2.3.0 are not delivered.** 2.3.0 added the input-mode selectors: the individual User Data and Event Data fields are enabled only when *User Data input mode* / *Event Data input mode* is *Individual fields*. GTM keeps the values of hidden fields stored but does not pass them to the tag (Preview run of 2026-10-29). A tag created on 2.2.x or earlier (`fa35f7d` and earlier, every field visible, no mode) with individual fields stores no mode, so on 2.3.0 and 2.3.1 its individual fields are not delivered:
+  - a Purchase fails with `Purchase requires: …` and sends nothing, unless GA4 Auto-Map supplies `order_id`, `currency` and `value`;
+  - other events are sent without those fields;
+  - `sid` and `udid` still come from the request cookies unless *Auto-map sid & udid from request cookies (fallback)* is unchecked.
+
+  2.3.1 does not change this behavior; it adds a hint to the Purchase ERROR and a README Troubleshooting row. *Action:* open each such tag, set *Event Data input mode* and *User Data input mode* to *Individual fields*, and save it. 3.0.0 removes the selectors.
