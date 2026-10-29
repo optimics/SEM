@@ -5236,9 +5236,13 @@ scenarios:
 
 - name: upgrade fixture - parameters absent in older saved tags
   code: |-
-    // A tag saved before v2.2/v2.3 has no value for the parameters those releases added
-    // (autoMapIdsFromCookies, the input modes, GA4 auto-map, the sznaiid cookie settings, eventSource,
-    // statusEnabled, BigQuery). Their runtime defaults apply. `expected` is the P0 v2.3.1 (1195cb4) body.
+    // A tag with individual fields saved before 2.2.x. The inputs are what such a tag stores: no value
+    // for the parameters added later (GA4 auto-map and the sznaiid cookie settings in 2.2.x,
+    // autoMapIdsFromCookies and the input modes in 2.3.0) or left unset (eventSource, statusEnabled,
+    // BigQuery), so their runtime defaults apply. GTM does not deliver fields hidden by the input mode
+    // (G11, v3-gates.md Gate 5), so 2.3.1 does not receive the individual fields and fails this Purchase.
+    // `expected` is what 3.0.0 sends: the body P0 v2.3.1 (1195cb4) sent when these values reached
+    // `data` directly, as in the editor's runCode.
     mock('getTimestampMillis', 1793000000000);
     mock('getRequestHeader', (name) => ({
       'trace-id': 'TRACE-OLD',
