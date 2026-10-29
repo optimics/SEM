@@ -692,3 +692,11 @@ Efektivní omezení zápisu řešte přes IAM na sGTM service accountu:
 | User data se posílají jako raw PII | Hashování musí proběhnout na frontendu před příchodem do SGTM. Serverová šablona nehashuje. |
 | `sznaiid` se neukládá do cookie | Zkontrolujte, že je zapnuté `persistSznaiidCookie`, request obsahuje `?sznaiid=...`, tag běží mimo GTM preview ping a tag neselhal (cookie se zapisuje až po úspěšné validaci). |
 | API errors | Zkontrolujte S2S SEM ID, payload shape a error logs (obsahují `x-request-id`). Tělo chybové odpovědi Seznamu je v diagnostickém řádku Response (Console logging `always`, nebo `debug` v Preview). Při ladění vypněte optimistic scenario. Request má timeout 5 s. |
+
+## Testy šablony v GTM editoru
+
+Šablona obsahuje vestavěné testy (záložka **Tests** v editoru šablony). Postup spuštění:
+
+1. Ve formuláři **Template Preview** napište do pole *S2S SEM ID (Sklik)* libovolnou hodnotu a neukládejte ji. Pole je povinné; dokud je prázdné, editor testy nespustí a v konzoli hlásí `Invalid input in Template Preview`.
+2. Spouštějte testy po jednom tlačítkem ▶ u každého testu. Spuštění všech testů najednou skončí chybou `Invalid input`: GTM odmítne požadavek se šablonou a všemi testy (402 574 znaků v běhu z 29. 10. 2026) a požadavek s jedním testem přijme (259 397 znaků).
+3. Editor posílá testy na Server container URL z *Admin → Container Settings*. Když tato adresa neodpoví na CORS preflight z `https://tagmanager.googleusercontent.com`, editor hlásí `Unable to connect to the tag server`.
