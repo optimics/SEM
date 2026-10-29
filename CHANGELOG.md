@@ -50,7 +50,7 @@ Every item below changes what an existing tag sends, whether it fails, or what i
 
 Status from the playground runs of 2026-10-26 (`review/gtm-verification/v3-gates.md`).
 
-1. **OPEN.** One green run of the embedded test suite in a connected GTM editor (2.3.1 gate R3). The editor answers "No tests were run … Invalid input / Invalid input in Template Preview", also with test names the editor accepts; re-run with this version.
+1. **OPEN.** One green run of the embedded test suite in a connected GTM editor (2.3.1 gate R3). The run of 2026-10-29 on `03d6138`, one test at a time, passed 225 of 240. This version fixes the 15 failures: 12 were the `JSON.parse` crash (Notes), 3 were tests that read the `Referer` header the editor's test request carries; the test setup now mocks it. Re-run with this version as described in the README section "Testy šablony v GTM editoru".
 2. **DONE.** Import of `feat/v3` over 2.3.1 in the playground (MIGRATION E3/E4/E5): the values of the moved legacy fields and their variable bindings survive the import and a re-save; a stored *Use Optimistic Scenario* `true` is kept; an unset `logType` behaves as `debug`; the re-save drops only the removed input-mode selectors.
 3. **PARTIAL.** The upgraded playground tags 17 and 20 in Preview against the upgrade fixtures (`upgrade fixture - tag 17` / `- tag 20`): tag 17 runs 3.0.0 and Seznam answers 200 on a PageView; tag 20 (Purchase) against its corrected fixture is open.
 4. **DONE.** Permissions: a manual import and save shows no permission dialog; the Permissions tab lists 8 permissions, with `read_container_data` and the narrowed `send_http`.
@@ -59,6 +59,7 @@ Status from the playground runs of 2026-10-26 (`review/gtm-verification/v3-gates
 ### Notes
 
 - Migration guide: README section "Přechod na verzi 3".
+- Malformed JSON no longer crashes the tag. In the sGTM runtime `JSON.parse` throws on invalid input (Google's API reference says it returns `undefined`), so a malformed User or Event Data Object, Contents, Product IDs or Consent Mode string stopped the tag with no hit and no log line. Every such string is now checked against the JSON grammar before it is parsed, and upgrade note 9 and the consent rule apply as written. The same fix is in 2.3.1.
 - Tests: 177 → 240 scenarios. Four upgrade fixtures assert the exact serialized body that 2.3.1 sent for the same inputs (playground tags 20 and 17, every legacy field at once, a tag saved before the v2.2/v2.3 parameters existed); the only differences allowed are upgrade notes 3, 4 and 12. A legacy field-mapping scenario checks all 31 v2.x data fields against an independent parameter-to-key table.
 - Sandboxed JS: 1342 → 1421 lines. The UI shrinks; the JS keeps the aliases, platform keys and BigQuery logging.
 - Items in `contents` without `id`, `content_name` and `content_category` are kept (decision of 2026-10-26, open in 2.3.1).
