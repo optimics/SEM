@@ -1,6 +1,6 @@
 # Seznam SEM (Server-Side) - Changelog
 
-## 2.3.1 (unreleased)
+## 2.3.1 - 2026-10-29
 
 Correctness patch for the v2.3 line. The tag now assembles all input layers, normalizes the result once and validates that final payload once, so what is checked is what is sent. No UI parameter is removed or renamed, no default value changes, and no permission is added. The INFO description is shortened to 176 characters, because the GTM editor rejects more than 200. `X-Client-Version` and `api.template_version` report `2.3.1`.
 
