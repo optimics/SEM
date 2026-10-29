@@ -72,7 +72,7 @@ Status from the playground runs of 2026-10-26 and 2026-10-29 (`review/gtm-verifi
 - The 30-day sznaiid lifetime is a single constant (`SZNAIID_MAX_AGE`) pending Seznam's answer on the lifetime `sem.js` uses.
 - `metadata.yaml` is re-pinned only after the release commit is pushed.
 
-## 2.3.1 (unreleased)
+## 2.3.1 - 2026-10-29
 
 Correctness patch for the v2.3 line. The tag now assembles all input layers, normalizes the result once and validates that final payload once, so what is checked is what is sent. No UI parameter is removed or renamed, no default value changes, and no permission is added. The INFO description is shortened to 176 characters, because the GTM editor rejects more than 200. `X-Client-Version` and `api.template_version` report `2.3.1`.
 
