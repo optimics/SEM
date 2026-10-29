@@ -60,8 +60,8 @@ Status from the playground runs of 2026-10-26 (`review/gtm-verification/v3-gates
 
 - Migration guide: README section "Přechod na verzi 3".
 - Malformed JSON no longer crashes the tag. In the sGTM runtime `JSON.parse` throws on invalid input (Google's API reference says it returns `undefined`), so a malformed User or Event Data Object, Contents, Product IDs or Consent Mode string stopped the tag with no hit and no log line. Every such string is now checked against the JSON grammar before it is parsed, and upgrade note 9 and the consent rule apply as written. JSON nested deeper than 64 levels is treated as invalid JSON: in the GTM editor the scan overflowed the sandbox stack at about 1,000 levels and the sandbox's own `JSON.parse` at 10,000, and Seznam's schema is at most 3 levels deep. The same fix is in 2.3.1.
-- Tests: 178 → 241 scenarios. Four upgrade fixtures assert the exact serialized body that 2.3.1 sent for the same inputs (playground tags 20 and 17, every legacy field at once, a tag saved before the v2.2/v2.3 parameters existed); the only differences allowed are upgrade notes 3, 4 and 12. A legacy field-mapping scenario checks all 31 v2.x data fields against an independent parameter-to-key table.
-- Sandboxed JS: 1416 → 1495 lines. The UI shrinks; the JS keeps the aliases, platform keys and BigQuery logging.
+- Tests: 185 → 248 scenarios. Four upgrade fixtures assert the exact serialized body that 2.3.1 sent for the same inputs (playground tags 20 and 17, every legacy field at once, a tag saved before the v2.2/v2.3 parameters existed); the only differences allowed are upgrade notes 3, 4 and 12. A legacy field-mapping scenario checks all 31 v2.x data fields against an independent parameter-to-key table.
+- Sandboxed JS: 1422 → 1501 lines. The UI shrinks; the JS keeps the aliases, platform keys and BigQuery logging.
 - Items in `contents` without `id`, `content_name` and `content_category` are kept (decision of 2026-10-26, open in 2.3.1).
 - The 30-day sznaiid lifetime is a single constant (`SZNAIID_MAX_AGE`) pending Seznam's answer on the lifetime `sem.js` uses.
 - `metadata.yaml` is re-pinned only after the release commit is pushed.
