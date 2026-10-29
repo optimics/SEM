@@ -1,6 +1,6 @@
 # Seznam SEM (Server-Side) - Changelog
 
-## 3.0.0 (unreleased)
+## 3.0.0 - 2026-10-29
 
 A smaller UI on top of the 2.3.1 behavior. New tags have 21 controls plus the 4 BigQuery controls: event and user data go into an object or a **Key – Value** table whose key is picked from a list. The 40 v2.x controls stay, under their v2.3 names, in the collapsed group **Starší pole (v2.x)**; they keep working and are reported in one aggregated WARN. `X-Client-Version` and `api.template_version` report `3.0.0`. The migration guide is the README section "Přechod na verzi 3".
 
