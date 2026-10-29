@@ -934,7 +934,8 @@ const BIGQUERY_ERROR_REASONS = [
   'resourceInUse', 'resourcesExceeded', 'responseTooLarge', 'stopped', 'tableUnavailable', 'timeout'
 ];
 
-// parseJson rejects deeper JSON: Seznam's schema has at most 3 levels; the sandbox stack overflows at ~1,000.
+// parseJson rejects deeper JSON. The Seznam fields this template reads from a JSON input nest at most
+// 3 levels (Event Data Object → contents → item); the sandbox stack overflows at ~1,000.
 const MAX_JSON_DEPTH = 64;
 
 const traceId = getRequestHeader('trace-id');
