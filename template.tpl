@@ -2905,6 +2905,32 @@ scenarios:
     assertApi('setCookie').wasNotCalled();
     assertSucceeded();
 
+- name: G5 - a failed Purchase with no stored Event Data input mode gets the Individual fields hint
+  code: |-
+    // A tag created before 2.3.0 stores no input mode. GTM does not deliver the fields hidden by the
+    // mode, so `data` holds neither the mode nor Order ID, Currency and Value.
+    runCode(tagData({ eventNameSelect: 'Purchase' }));
+    assertFailedWithoutRequest();
+    assertThat(errorLines()).isEqualTo([
+      'Seznam SEM [ERROR]: Purchase requires: order_id, currency, value' + INPUT_MODE_HINT + ' | event=Purchase | trace=undefined'
+    ]);
+
+- name: G5 - a failed Purchase in Object variable mode gets the Individual fields hint
+  code: |-
+    runCode(tagData({ eventNameSelect: 'Purchase', eventDataInputMode: 'object', eventDataObject: { order_id: 'O-1' } }));
+    assertFailedWithoutRequest();
+    assertThat(errorLines()).isEqualTo([
+      'Seznam SEM [ERROR]: Purchase requires: currency, value' + INPUT_MODE_HINT + ' | event=Purchase | trace=undefined'
+    ]);
+
+- name: G5 - a failed Purchase in Individual fields mode gets no hint
+  code: |-
+    runCode(tagData({ eventNameSelect: 'Purchase', eventDataInputMode: 'fields', orderId: 'O-1' }));
+    assertFailedWithoutRequest();
+    assertThat(errorLines()).isEqualTo([
+      'Seznam SEM [ERROR]: Purchase requires: currency, value | event=Purchase | trace=undefined'
+    ]);
+
 - name: status false is included in payload
   code: |-
     let capturedBody;
@@ -5034,6 +5060,17 @@ setup: |-
     let json = '1';
     for (let n = 0; n < levels; n++) json = '[' + json + ']';
     return json;
+  }
+
+  // G5: the scenario's ERROR lines, and the clause a failed Purchase gets when Event Data input mode
+  // is not 'Individual fields'.
+  const INPUT_MODE_HINT = "; individual Event Data fields are ignored unless Event Data input mode is 'Individual fields' (README Troubleshooting)";
+  function errorLines() {
+    const errors = [];
+    for (let n = 0; n < logs.length; n++) {
+      if (logs[n].indexOf('[ERROR]') !== -1) errors.push(logs[n]);
+    }
+    return errors;
   }
 
   // Configuration and validation failures stop the tag synchronously: no request, no cookie write.
