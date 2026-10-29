@@ -108,7 +108,10 @@ Every item below changes what an existing tag sends or whether it fails. After u
 2. Preview of the upgraded playground tags (17 and 20): payloads, consent behavior and `Set-Cookie`. **DONE.** HEAD 551bb2d was verified at runtime in real sGTM: the existing tag 17 fired on the upgraded template, rtgconv answered `200`, `api.template_version` was `2.3.1`, and `sid`/`udid` came from the cookie fallback; no permission dialog appeared on import. On `a2d5a78` (2026-10-29, playground workspace 4, `review/gtm-verification/v3-gates.md`, "2.3.1 release gate 2"):
    - Tag 20, which stores *Individual fields* for both input modes, sent test order 2026000030 and rtgconv answered `200`. The payload had `consent_mode` (5 keys), `order_id`, `currency`, `value`, `value_tax`, `contents` with `quantity` 2, `api.template_version` `2.3.1`, `sznaiid` from the cookie, and no `status`.
    - The sGTM response to the landing hit on `?sznaiid=test123` carried `Set-Cookie: sznaiid=test123; Max-Age=7776000; Domain=semdemo.xyz; Path=/; SameSite=lax; Secure`, with no `HttpOnly`.
-3. The README consent transport verified end to end (browser → GA4 client event data → mapped variable → outgoing `consent_mode`).
+3. The README consent transport verified end to end (browser → GA4 client event data → mapped variable → outgoing `consent_mode`). **DONE** on `a2d5a78` (2026-10-29, README "Varianta A", `review/gtm-verification/v3-gates.md`, "2.3.1 release gate 3"):
+   - The web GA4 `page_view` carried `sem_consent`, built from the page's real Consent Mode state. The sGTM event data held the full 56-character string.
+   - The Event Data variable `sem_consent` fed the *Consent Mode Object* of tag 17. The outgoing `consent_mode` had `ad_storage`, `ad_user_data` and `ad_personalization` `granted` (`1` → `granted`), `s2s_headers` were sent, and rtgconv answered `200`.
+   - The real state was all granted, so `0` → `denied` was not exercised live; the runner tests cover it.
 4. The "(unreleased)" label replaced by the release date only in the release commit; `metadata.yaml` re-pinned after the push.
 
 ### Notes
