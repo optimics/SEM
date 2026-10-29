@@ -4,7 +4,7 @@ Server-Side Google Tag Manager šablona pro odesílání konverzních událostí
 
 Data události a uživatele zadáváte v tabulkách **Klíč – Hodnota** (klíč vybíráte ze seznamu, hodnotu přiřadíte z GTM proměnné) nebo jako objekt z GTM proměnné. Volitelně umí šablona část dat předvyplnit z příchozí GA4 události (`getAllEventData()`); ve výchozím stavu je to vypnuté.
 
-Změny mezi verzemi a kontrolní postup po aktualizaci (upgrade notes, Preview checklist) jsou v [CHANGELOG.md](CHANGELOG.md). Přechod z verze 2.x popisuje sekce [Přechod na verzi 3](#přechod-na-verzi-3).
+Změny mezi verzemi a kontrolní postup po aktualizaci (upgrade notes, Preview checklist) jsou v [CHANGELOG.md](CHANGELOG.md). Přechod z verze 2.x popisuje sekce [Přechod na verzi 3](#přechod-na-verzi-3). Problémy, které Seznam v S2S datech vidí nejčastěji (pokrytí `sid`, hity před souhlasem, `quantity` 0, `null`/`undefined`, Purchase bez `order_id`, „denied“ po přijetí cookie lišty), shrnuje sekce [Nejčastější problémy v datech](#nejčastější-problémy-v-datech).
 
 ## Důležité před nasazením
 
@@ -80,6 +80,90 @@ Výjimky:
 - `sid` a `udid` se nehashují.
 - `subscription_id` se posílá tak, jak ho máte v systému.
 - `review_email` pro Zboží.cz dotazník spokojenosti se posílá jako plain text.
+
+## Nejčastější problémy v datech
+
+Seznam v S2S datech opakovaně vidí šest problémů. Část z nich řeší šablona, zbytek je potřeba opravit na webu nebo v kontejneru. Opravy v šabloně platí od verze 2.3.1; starší verze odesílaly `quantity` 0, hodnoty `null`, texty `'undefined'` / `'null'` a GA4 Purchase s `order_id: null`. Verzi, která hit poslala, uvádí `api.template_version` v payloadu a hlavička `X-Client-Version` (verze 2.3.0 hlásí `2.2.1`).
+
+| Problém | Co dělá šablona (od 2.3.1) | Co nastavit na webu a v kontejneru |
+|---|---|---|
+| [Nízké pokrytí `sid`](#1-nízké-pokrytí-sid) | Doplní `sid`/`udid` z cookies, kontroluje jejich tvar, bez platného `sid` zaloguje warning. `sid` vytvořit neumí. | `sul.js` před GA4, `SEM('updateConsent', …)`, SGTM na stejné doméně jako web. |
+| [Hity před souhlasem](#2-hity-před-souhlasem) | Hity podle souhlasu neblokuje; předá stav souhlasu, který dostane. | Consent Mode Object v každém tagu, CMP před GTM, pomocná událost po souhlasu. |
+| [`quantity` 0](#3-quantity-0) | Položku s neplatným množstvím zahodí, chybějící množství odešle jako `1`. | Celé `quantity` alespoň 1 v datech webu. |
+| [Hodnoty `null` a `undefined`](#4-hodnoty-null-a-undefined) | Nevyplněné hodnoty a texty `'undefined'` / `'null'` neodešle; neplatné nepovinné hodnoty vynechá. | Opravit GTM proměnné, které warning jmenuje. |
+| [Purchase bez `order_id`](#5-purchase-bez-order_id) | Purchase bez `order_id`, `currency` nebo `value` neodešle; tag skončí *Failed*. | `transaction_id` přímo na události `purchase`, nebo řádek `order_id` v tabulce Event data. |
+| [„denied“ i po přijetí cookie lišty](#6-denied-i-po-přijetí-cookie-lišty) | Převede `1`, `'1'` a `'true'` na `granted`; chybný consent tag zastaví. | Projít příčiny níže v sGTM Preview. |
+
+S BigQuery loggingem změříte dotazem [Dotaz na kvalitu dat](#dotaz-na-kvalitu-dat) pokrytí `sid` a `udid`, neplatné `quantity`, hodnoty `null` a `undefined`, Purchase bez `order_id` (jen u verzí před 2.3.1) a hity bez `consent_mode` nebo s `ad_storage` `denied`. Zda hit odešel před souhlasem, nebo s „denied“ po přijetí cookie lišty, z payloadu nepoznáte; to ověříte v sGTM Preview.
+
+### 1. Nízké pokrytí `sid`
+
+`sid` vytváří na webu `sul.js`, a to až po udělení souhlasu a po asynchronním požadavku na identitu. Serverová šablona `sid` nevytváří: převezme ho z tagu, nebo z cookie `sid` v requestu.
+
+Příčiny:
+
+- `sul.js` na stránce chybí nebo se načte až po GA4 tagu; událost odeslaná dřív odejde bez `sid`, pokud ještě není k dispozici platná identita ([`sul.js` je stále potřeba](#suljs-je-stále-potřeba)).
+- CMP bez IAB TCF nepředá souhlas `sul.js` voláním `SEM('updateConsent', …)`. Bez něj `sul.js` cookies `sid` ani `udid` nevytvoří ([Souhlas musí dostat `sul.js` i serverový tag](#souhlas-musí-dostat-suljs-i-serverový-tag-dva-samostatné-kroky)).
+- SGTM běží na jiné doméně než web, takže cookies `sid` a `udid` do SGTM nedorazí ([SGTM endpoint musí být na stejném webu](#sgtm-endpoint-musí-být-na-stejném-webu-same-site)).
+- Vstupní stránka: `page_view` odejde bez `sid`, pokud ještě není k dispozici platná identita. Existující platné `sid` šablona předá i při `denied`; omezený automatický redispatch v GA4 Advanced Consent Mode popisuje [bod 2](#2-hity-před-souhlasem).
+- Safari (ITP) maže cookies `sid` a `udid` po 7 dnech bez interakce s webem ([Auto-map sid/udid z cookies](#auto-map-sidudid-z-cookies)).
+- Namapovaný `sid` v jiném tvaru než `id=…|t=…|te=…|c=<32 znaků>` šablona zahodí (warning `ignoring malformed sid from the tag configuration`) a použije cookie `sid`, pokud je cookie fallback zapnutý a cookie má správný tvar.
+
+Kontrola v sGTM Preview: hit bez platného `sid` zaloguje warning `no valid sid`. Diagnostický řádek `Request` (Console logging `always`, nebo `debug` v Preview) uvádí v poli `Identity` zdroj `sid` a `udid`: `tag`, `cookie` nebo `missing`.
+
+### 2. Hity před souhlasem
+
+Šablona hity podle souhlasu neblokuje. Odešle každý hit, na který se tag spustí, se stavem souhlasu z polí Consent Mode Object a Consent String. Hit před souhlasem tedy nese výchozí stav CMP; jak ho vyhodnotí, je na Seznamu ([Co šablona s consentem dělá a co ne](#co-šablona-s-consentem-dělá-a-co-ne)). Kdy se tag spouští, určuje jeho trigger v SGTM.
+
+Co zkontrolovat:
+
+- Consent Mode Object je namapovaný v každém SEM tagu, včetně tagů s GA4 prefill. Bez něj hit odejde bez `consent_mode`. Když není vyplněný ani Consent String, šablona zaloguje warning `no consent signal` a hit nenese žádnou informaci o souhlasu ([Přenos stavu souhlasu do SGTM](#přenos-stavu-souhlasu-do-sgtm)).
+- CMP se načítá před GTM a nastavuje výchozí stav (`default`), aktualizaci (`update`) a `wait_for_update`.
+- V testovaném GA4 Advanced Consent Mode toku 26. 10. 2026 se po udělení `ad_storage` znovu odeslal tentýž `page_view` s `x-ga-gcu`; SEM tag se na tomto omezeném redispatchi nespustil, zatímco nový běžný `page_view` po souhlasu ho spustil. U vlastního webu ověřte původní hit, redispatch a seznam spuštěných tagů v Preview. Postup s pomocnou událostí `sem_consent_ready` popisuje sekce [Hity před souhlasem a po něm](#hity-před-souhlasem-a-po-něm).
+
+### 3. `quantity` 0
+
+Před verzí 2.3.1 šablona množství z GA4 položek zaokrouhlovala dolů (`0.5` → `0`) a množství z ostatních zdrojů nekontrolovala. Od verze 2.3.1 platí pro `contents` ze všech zdrojů:
+
+- Chybějící `quantity` se odešle jako `1`.
+- Položka s množstvím 0, záporným, desetinným nebo nečíselným se zahodí s warningem `…quantity: expected integer >= 1, got …; dropping the item`. Ostatní položky i událost se odešlou.
+- Když se zahodí všechny položky, `contents` se neodešle.
+
+Oprava je v datech webu: posílejte `quantity` jako celé číslo alespoň 1. Pravidla popisuje sekce [Contents - ruční formát](#contents---ruční-formát).
+
+### 4. Hodnoty `null` a `undefined`
+
+Zdrojem bývá GTM proměnná, která na dané události nemá hodnotu, nebo se vyhodnotí na text `'undefined'` / `'null'`. Před verzí 2.3.1 šablona takový text odeslala a přepsala jím platnou hodnotu z nižší vrstvy, NaN a Infinity odeslala jako `null` a klíče mimo schéma Seznamu přeposílala. Od verze 2.3.1:
+
+- `undefined`, `null`, prázdný řetězec a text `'undefined'` / `'null'` znamenají nevyplněnou hodnotu: nic nepřepíšou a neodešlou se. Text zaloguje warning `<pole> is the placeholder string "undefined"; treating it as missing` (u textu `'null'` je v řádku `"null"`). Výjimkou jsou volné texty `search_string`, `content_name` a `content_category`, kde text zůstane.
+- Neplatná nepovinná hodnota (například číslo `1 234,50`) se vynechá s warningem; NaN ani Infinity se neodešlou.
+- Klíč mimo schéma Seznamu se neodešle (warning `… is not a Seznam field, dropping`).
+
+Oprava: opravte mapování proměnné, kterou warning jmenuje. Pravidla popisuje sekce [Typová normalizace](#typová-normalizace).
+
+### 5. Purchase bez `order_id`
+
+Před verzí 2.3.1 šablona kontrolovala vstupní pole místo odesílaného payloadu, takže GA4 Purchase mohl odejít s `order_id: null`, a GA4 prefill převáděl objekt v `transaction_id` na text `"[object Object]"`. Od verze 2.3.1 se kontroluje výsledný payload: Purchase bez `order_id`, `currency` nebo `value` tag zastaví (*Failed*), nic neodešle a zaloguje `Seznam SEM [ERROR]: Purchase requires: <chybějící pole>`. Seznam tedy Purchase bez `order_id` nedostane; chybu uvidíte jako neúspěšný tag v sGTM.
+
+`order_id` šablona bere z těchto vrstev, pozdější přepisuje dřívější: GA4 prefill (`transaction_id` → `id` → `orderNo`), Event Data Object, starší pole Order ID, starší tabulka Event Data Overrides (v2.x), tabulka Event data (řádek `order_id`).
+
+Co zkontrolovat:
+
+- S GA4 prefill musí být `transaction_id` v event datech samotné události `purchase`. Šablona čte jen data události, na kterou se spustila.
+- `value` je hodnota bez DPH v CZK; šablona ji nedopočítává z položek.
+- Verze 2.3.0 a 2.3.1: tag vytvořený ve verzi 2.2.x nebo starší s vyplněnými jednotlivými poli nemá uložený režim vstupu a GTM mu jednotlivá pole nepředá. Purchase pak skončí chybou `Purchase requires: …`, pokud `order_id`, `currency` a `value` nedodá GA4 Auto-Map; ve verzi 2.3.1 je může dodat i jiná doručená vrstva, například *Advanced Overrides*. Ve verzi 2.3.1 zvolte v *Event Data input mode* a *User Data input mode* režim, ve kterém má tag hodnoty (*Individual fields* pro jednotlivá pole, *Object variable* pro Event/User Data Object), a tag uložte. Jeden režim skryje pole druhého: používá-li tag obojí, přidejte potřebné klíče z druhého režimu jako řádky *Event Data Overrides* / *User Data Overrides* (skupina *Advanced Overrides*, platí v obou režimech), nebo aktualizujte na verzi 3 ([Výjimky](#výjimky--co-se-změní-i-při-zachované-kompatibilitě)).
+
+### 6. „denied“ i po přijetí cookie lišty
+
+Šablona stav souhlasu nevytváří. Odešle to, co dostane v polích Consent Mode Object a Consent String; od verze 2.3.1 převede `1`, `'1'` a `'true'` na `granted` a `0`, `'0'` a `'false'` na `denied`. Příčiny, které lze ověřit v sGTM Preview:
+
+1. **Hit z doby před souhlasem.** Hit odeslaný před aktualizací souhlasu nese výchozí stav a automaticky znovu odeslaný hit po přijetí SEM tag nespustí ([bod 2](#2-hity-před-souhlasem)).
+2. **Chybějící nebo chybné mapování.** Chybí-li Consent Mode Object i Consent String, platný hit odejde bez consentu s warningem `no consent signal`. Obsahuje-li vyplněný Consent Mode Object obal `{"consent_mode": {...}}` nebo zkrácený JSON, od verze 2.3.1 tag skončí *Failed* s řádkem `Seznam SEM [ERROR]: consentModeObject: …`.
+3. **Částečný souhlas.** CMP udělí jen část souhlasů a `ad_user_data` nebo `ad_personalization` zůstane `denied`. Hodnoty proměnné musí vycházet ze skutečné volby uživatele v CMP.
+4. **TCF string má přednost.** Vyplněný Consent String (IAB TCF) Seznam vyhodnocuje přednostně před `consent_mode`. Pole vyplňte jen tehdy, když CMP je IAB TCF v2 a má Seznam ve vendor listu ([IAB TCF consent string](#iab-tcf-consent-string)).
+5. **Starší verze šablony.** Před verzí 2.3.1 šablona převáděla na `granted` / `denied` jen `true` / `false`; hodnoty jako `1`, `'1'` nebo `'true'` odeslala beze změny, mimo hodnoty schématu (`granted`, `denied`).
+
+Ověření: v diagnostickém řádku `Request` porovnejte `Consent.x_ga_gcs` (stav Google Consent Mode, který viděl GA4; `G111` znamená `ad_storage` i `analytics_storage` granted) s klíči `ad_storage` a `analytics_storage` v `Consent.consent_mode`. `x_ga_gcs` nepopisuje ostatní tři podporované klíče a chybí, když event data hodnotu `x-ga-gcs` neobsahují (například událost z jiného klienta než GA4). Když se klíč přítomný v obou liší, proměnná se stavem souhlasu neodpovídá stavu Google Consent Mode; zdroj proměnné ověřte proti CMP pro daný hit. Částečný `consent_mode` sám o sobě chyba není. Stav souhlasu pro `sul.js` na webu nastavuje samostatný krok (`SEM('updateConsent', …)` u CMP bez IAB TCF); ověřte oba.
 
 ## Instalace
 
@@ -662,6 +746,38 @@ Poznámky:
 - `timestamp` musí být **INT64**, ne TIMESTAMP — šablona vkládá milisekundy jako číslo. V dotazech převedeš přes `TIMESTAMP_MILLIS(timestamp)`.
 - Všechny sloupce NULLABLE. U validační nebo konfigurační chyby (před odesláním) se vyplní `tag_name`, `event_name`, `request_method`, `request_url`, `timestamp` a do `response_body` text chyby; `request_body`, `request_id`, `response_status_code` a `response_headers` zůstanou NULL. U requestu, který selhal bez HTTP odpovědi (timeout, síťová chyba), se vyplní request část včetně `request_body` a response sloupce zůstanou NULL.
 - Zápis probíhá s `ignoreUnknownValues: true`, takže sloupce navíc v tabulce nevadí, ale názvy/typy výše musí sedět.
+
+### Dotaz na kvalitu dat
+
+Dotaz ukáže za posledních 30 dní pro každou verzi šablony a událost podíl hitů se `sid` a `udid` a počty hitů s problémy ze sekce [Nejčastější problémy v datech](#nejčastější-problémy-v-datech). Počítá jen odeslané requesty (`request_body` není NULL). Hit zastavený validací (například Purchase bez `order_id` od verze 2.3.1) má `request_body` NULL a text chyby v `response_body`; sloupec `purchase_bez_order_id` proto zachytí jen starší verze. Sloupec `bez_consent_mode` počítá i hity, které nesou jen `consent_string` (IAB TCF).
+
+```sql
+SELECT
+  JSON_VALUE(request_body, '$.api.template_version') AS verze,
+  event_name,
+  COUNT(*) AS hity,
+  ROUND(100 * COUNTIF(JSON_VALUE(request_body, '$.user_ids.user_data.sid') IS NOT NULL) / COUNT(*), 1) AS se_sid_pct,
+  ROUND(100 * COUNTIF(JSON_VALUE(request_body, '$.user_ids.user_data.udid') IS NOT NULL) / COUNT(*), 1) AS se_udid_pct,
+  COUNTIF(JSON_QUERY(request_body, '$.consent_mode') IS NULL) AS bez_consent_mode,
+  COUNTIF(JSON_VALUE(request_body, '$.consent_mode.ad_storage') = 'denied') AS ad_storage_denied,
+  COUNTIF(event_name = 'Purchase' AND JSON_VALUE(request_body, '$.event_data.order_id') IS NULL) AS purchase_bez_order_id,
+  COUNTIF(EXISTS(
+    SELECT 1 FROM UNNEST(JSON_QUERY_ARRAY(PARSE_JSON(request_body), '$.event_data.contents')) AS polozka
+    WHERE JSON_QUERY(polozka, '$.quantity') IS NOT NULL
+      AND (
+        JSON_TYPE(JSON_QUERY(polozka, '$.quantity')) != 'number'
+        OR NOT REGEXP_CONTAINS(JSON_VALUE(polozka, '$.quantity'), r'^[1-9][0-9]*$')
+      )
+  )) AS neplatne_quantity,
+  COUNTIF(REGEXP_CONTAINS(request_body, r'[:,\[]null[,}\]]|"(undefined|null)"')) AS null_nebo_undefined
+FROM `PROJECT.DATASET.sem_log`
+WHERE request_body IS NOT NULL
+  AND TIMESTAMP_MILLIS(timestamp) >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
+GROUP BY verze, event_name
+ORDER BY verze, hity DESC;
+```
+
+Sloupec `null_nebo_undefined` hledá v celém payloadu hodnotu `null` a texty `"undefined"` / `"null"`, tedy i ve volných textech (`content_name`, `search_string`); řádky s nenulovým počtem si projděte. Zastavené hity podle chyby spočítáte dotazem nad řádky s `request_body IS NULL`, seskupenými podle `REGEXP_REPLACE(response_body, r' \| trace=\S+', '')`. U chyby validace obsahuje text ` | event=<název>` a, když request nese hlavičku `trace-id`, i ` | trace=<id>`, který může být pro každý hit jiný.
 
 ### Oprávnění
 
